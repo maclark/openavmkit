@@ -3,6 +3,8 @@ name: CLA Check
 on:
   pull_request:
     types: [opened, reopened, synchronize]
+  
+  workflow_dispatch: # Enable manual trigger
 
 jobs:
   check-cla:
