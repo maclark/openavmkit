@@ -1,0 +1,31 @@
+name: CLA Check
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  check-cla:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check CLA Agreement
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+            
+            // Check if a comment contains the CLA agreement
+            const claSigned = comments.some(comment =>
+              comment.body.toLowerCase().includes('i agree to the cla')
+            );
+            
+            if (!claSigned) {
+              core.setFailed(
+                "Contributor has not signed the CLA. Please comment 'I agree to the CLA' to proceed."
+              );
+            }
