@@ -20,7 +20,7 @@ jobs:
         # Combined conditions with logical AND (&&) between the two sets of conditions
         if: >-
           ((github.event.comment.body == 'recheck' || github.event.comment.body == 'I affirm that this contributor has signed the CLA') || github.event_name == 'pull_request_target') &&
-          (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event.comment.author_association == 'COLLABORATOR' || github.event_name == 'pull_request_target')
+          (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'MEMBER' || github.event_name == 'pull_request_target')
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

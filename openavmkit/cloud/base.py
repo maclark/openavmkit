@@ -167,6 +167,9 @@ class CloudService:
     for entry in local_files:
       remote_path = entry["remote"]
       local_file_path = entry["local"]
+      if os.path.isdir(local_file_path):
+        continue
+
       if remote_path not in remote_files:
         # File exists in local only: upload it.
         if verbose:

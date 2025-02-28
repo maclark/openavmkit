@@ -1,7 +1,8 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import requests
-from huggingface_hub import hf_hub_url, HfApi, upload_file as hf_upload_file
+from huggingface_hub import hf_hub_url, upload_file as hf_upload_file
+from huggingface_hub.hf_api import HfApi, RepoFolder
 from openavmkit.cloud.base import CloudCredentials, CloudService, CloudFile
 
 class HuggingFaceCredentials(CloudCredentials):
@@ -17,29 +18,39 @@ class HuggingFaceService(CloudService):
       self,
       credentials: HuggingFaceCredentials,
       repo_id: str,
-      revision: str = "main",
-      repo_type: str = "dataset"
+      revision: str = "main"
   ):
     super().__init__("huggingface", credentials)
     self.repo_id = repo_id
     self.revision = revision
     self.token = credentials.token
-    self.repo_type = repo_type
     self.api = HfApi()
 
 
   def list_files(self, remote_path: str) -> list[CloudFile]:
-    info = self.api.model_info(repo_id=self.repo_id, revision=self.revision, token=self.token)
+    infos = self.api.list_repo_tree(
+      repo_id=self.repo_id,
+      revision=self.revision,
+      token=self.token,
+      path_in_repo=remote_path,
+      repo_type="dataset",
+      recursive=True,
+      expand=True
+    )
+
     files = []
-    for sibling in info.siblings:
-      if sibling.rfilename.startswith(remote_path):
-        last_modified = sibling.lastModified
-        if isinstance(last_modified, str):
-          last_modified = datetime.fromisoformat(last_modified.replace("Z", "+00:00"))
+    for info in infos:
+
+      if isinstance(info, RepoFolder):
+        continue
+
+      if info.rfilename.startswith(remote_path):
+        last_modified_date: datetime = info.last_commit.date
+        last_modified_utc = last_modified_date.astimezone(timezone.utc)
         files.append(CloudFile(
-          name=sibling.rfilename,
-          last_modified_utc=last_modified,
-          size=sibling.size
+          name=info.rfilename,
+          last_modified_utc=last_modified_utc,
+          size=info.size
         ))
     return files
 
@@ -49,10 +60,11 @@ class HuggingFaceService(CloudService):
     url = hf_hub_url(
       repo_id=self.repo_id,
       filename=remote_file.name,
-      repo_type=self.repo_type,
-      revision=self.revision,
+      repo_type="dataset",
+      revision=self.revision
     )
-    response = requests.get(url)
+    headers = {"authorization": f"Bearer {self.token}"}
+    response = requests.get(url, headers=headers)
     response.raise_for_status()
     with open(local_file_path, "wb") as f:
       f.write(response.content)
@@ -65,6 +77,7 @@ class HuggingFaceService(CloudService):
       path_in_repo=remote_file_path,
       repo_id=self.repo_id,
       token=self.token,
+      repo_type="dataset",
       commit_message="Upload via OpenAVMKit"
     )
 
@@ -74,8 +87,7 @@ def init_service_huggingface(credentials: HuggingFaceCredentials):
   if repo_id is None:
     raise ValueError("Missing 'HF_REPO_ID' in environment")
   revision = os.getenv("HF_REVISION", "main")
-  repo_type = os.getenv("HF_REPO_TYPE", "dataset")
-  return HuggingFaceService(credentials, repo_id, revision, repo_type)
+  return HuggingFaceService(credentials, repo_id, revision)
 
 
 def get_creds_from_env_huggingface() -> HuggingFaceCredentials:
