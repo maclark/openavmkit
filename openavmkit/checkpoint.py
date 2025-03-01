@@ -70,6 +70,7 @@ def write_checkpoint(data: Any, path: str):
 
 
 def delete_checkpoints(prefix: str):
+  os.makedirs("out/checkpoints", exist_ok=True)
   for file in os.listdir("out/checkpoints"):
     if file.startswith(prefix):
       os.remove(f"out/checkpoints/{file}")
