@@ -388,6 +388,8 @@ def _set_locality(nbs, locality: str):
    if base_path is not None:
       os.chdir(nbs.base_path)
 
+   os.makedirs(f"data/{locality}", exist_ok=True)
+
    os.chdir(f"data/{locality}")
 
    print(f"locality = {locality}")
