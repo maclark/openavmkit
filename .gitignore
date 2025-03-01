@@ -11,6 +11,7 @@ notebooks/data/
 notebooks/out/
 .ipynb_checkpoints/
 .venv/*
+venv/*
 
 testing.ipynb
 
