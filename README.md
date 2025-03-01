@@ -47,6 +47,44 @@ venv\Scripts\activate
 
 *_On a typical computer, there will be other programs that are using other versions of python and/or have their own conflicting versions of libraries that `openavmkit` might also need to use. To keep `openavmkit` from conflicting with your existing setup, we set up a 'virtual environment,' which is like a special bubble that is localized just to `openavmkit`. In this way `openavmkit` gets to use exactly the stuff it needs without messing with whatever else is already on your computer._
 
+Let me explain a little bit what's going on here. The first command, `python -m venv venv`, _creates_ the virtual environment. You only have to run that once. The second command, the bit that ends with `activate`, is what actually _starts_ the virtual environment. You have to run that every time you open a new terminal window or tab and want to work on `openavmkit`.
+
+You can tell that you are in the virtual environment, because your command prompt will change to show the name of the virtual environment, which in this case is `venv`. Here's how your command prompt will look inside and outside the virtual environment.
+
+**Outside the virtual environment:**
+
+_MacOS/Linux:_
+```bash
+/path/to/openavmkit$
+```
+
+_Windows:_
+```bash
+C:\path\to\openavmkit>
+```
+
+**Inside the virtual environment:**
+
+_MacOS/Linux:_
+```bash
+(venv) /path/to/openavmkit$
+```
+
+_Windows:_
+```bash
+(venv) C:\path\to\openavmkit>
+```
+
+Take careful note that you are actually inside the virtual environment when running the following commands.
+
+When you are done working on `openavmkit` and want to leave the virtual environment, you can run this command:
+
+```bash
+deactivate
+```
+
+And you will return to your normal command prompt.
+
 ## 3. Install dependencies
 
 `openavmkit` uses a bunch of third-party libraries that you need to install. Python lets us list these in a text files so you can install them with one command. Here's how you can do that, using python's built-in `pip` tool, which manages your python libraries:
@@ -106,6 +144,8 @@ When you run `jupyter notebook`, it will open a new tab in your web browser that
 
 Here's how you can import and use the core modules directly in your own Python code.
 
+For instance, here's a simple example that demonstrates how to calculate the Coefficient of Dispersion (COD) for a list of ratios:
+
 ```python
 import openavmkit
 
@@ -118,6 +158,18 @@ You can also specify the specific module you want to import:
 
 ```python
 from openavmkit.utilities import stats
+
+ratios = [0.8, 0.9, 1.0, 1.1, 1.2]
+cod = stats.calc_cod(ratios)
+```
+
+Or even import specific functions directly:
+
+```python
+from openavmkit.utilities.stats import calc_cod
+
+ratios = [0.8, 0.9, 1.0, 1.1, 1.2]
+cod = calc_cod(ratios)
 ```
 
 ## Using the Jupyter Notebooks
@@ -129,7 +181,20 @@ The `notebooks/` directory contains several pre-written Jupyter notebooks that d
 jupyter notebook
 ```
 
+This should open a new tab in your web browser with the Jupyter interface.
+
+![Jupyter interface](images/jupyter_01.png)
+
 2. Navigate to the `notebooks/` directory in the Jupyter interface and open the notebook you want to run.
+
+![Open notebook](images/jupyter_02.png)
+
+Double-click on your chosen notebook to open it.
+
+![Running notebook](images/jupyter_03.png)
+
+For information on how to use Jupyter notebooks in general, refer to the [official Jupyter notebook documentation](https://jupyter-notebook.readthedocs.io/en/stable/).
+ 
 
 ## Running tests
 
