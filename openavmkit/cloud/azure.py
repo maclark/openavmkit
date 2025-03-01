@@ -1,6 +1,6 @@
 import os
 
-from openavmkit.cloud.base import CloudCredentials, CloudService, CloudType, CloudFile
+from openavmkit.cloud.base import CloudCredentials, CloudService, CloudType, CloudFile, CloudAccess
 from azure.storage.blob import BlobServiceClient
 
 class AzureCredentials(CloudCredentials):
@@ -12,8 +12,8 @@ class AzureCredentials(CloudCredentials):
 
 class AzureService(CloudService):
 
-  def __init__(self, credentials: AzureCredentials, container_name: str):
-    super().__init__("azure", credentials)
+  def __init__(self, credentials: AzureCredentials, container_name: str, access: CloudAccess):
+    super().__init__("azure", credentials, access)
     self.connection_string = credentials.connection_string
     self.blob_service_client = BlobServiceClient.from_connection_string(credentials.connection_string)
     self.container_client = self.blob_service_client.get_container_client(container_name)
@@ -45,12 +45,12 @@ class AzureService(CloudService):
       blob_client.upload_blob(f, overwrite=True)
 
 
-def init_service_azure(credentials: AzureCredentials) -> AzureService:
+def init_service_azure(credentials: AzureCredentials, access: CloudAccess) -> AzureService:
   container_name = os.getenv("AZURE_STORAGE_CONTAINER_NAME")
   if container_name is None:
     raise ValueError("Missing 'AZURE_STORAGE_CONTAINER_NAME' in environment.")
   if isinstance(credentials, AzureCredentials):
-    return AzureService(credentials, container_name)
+    service = AzureService(credentials, container_name, access)
   else:
     raise ValueError("Invalid credentials for Azure service.")
 

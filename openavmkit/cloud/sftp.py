@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timezone
 
 import paramiko
-from openavmkit.cloud.base import CloudCredentials, CloudService, CloudFile, _fix_path_slashes
+from openavmkit.cloud.base import CloudCredentials, CloudService, CloudFile, _fix_path_slashes, CloudAccess
 
 
 class SFTPCredentials(CloudCredentials):
@@ -24,8 +24,8 @@ class SFTPCredentials(CloudCredentials):
 
 
 class SFTPService(CloudService):
-  def __init__(self, credentials: SFTPCredentials, base_path: str = ".", timeout: int = 30, retries: int = 3):
-    super().__init__("sftp", credentials)
+  def __init__(self, credentials: SFTPCredentials, access: CloudAccess, base_path: str = ".", timeout: int = 30, retries: int = 3):
+    super().__init__("sftp", credentials, access)
     self.base_path = base_path
     self.ssh_client = paramiko.SSHClient()
     self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -217,9 +217,10 @@ class SFTPService(CloudService):
     self.close()
 
 
-def init_service_sftp(credentials: SFTPCredentials) -> SFTPService:
+def init_service_sftp(credentials: SFTPCredentials, access: CloudAccess) -> SFTPService:
   base_path = os.getenv("SFTP_BASE_PATH", "./openavmkit")
-  return SFTPService(credentials, base_path)
+  service = SFTPService(credentials, access, base_path)
+  return service
 
 
 def get_creds_from_env_sftp() -> SFTPCredentials:

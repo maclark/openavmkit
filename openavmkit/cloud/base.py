@@ -12,6 +12,11 @@ CloudType = Literal[
   # "gcp"
 ]
 
+CloudAccess = Literal[
+  "read_only",
+  "read_write"
+]
+
 class CloudFile:
   def __init__(self, name: str, last_modified_utc: datetime, size: int):
     self.name = _fix_path_slashes(name)
@@ -25,8 +30,10 @@ class CloudCredentials:
 
 
 class CloudService:
-  def __init__(self, cloud_type: CloudType, credentials: CloudCredentials, verbose: bool = False):
+  def __init__(self, cloud_type: CloudType, credentials: CloudCredentials, access: CloudAccess, verbose: bool = False):
     self.cloud_type = cloud_type
+    self.access = access
+    self.write = access == "read_write"
     self.credentials = credentials
     self.verbose = verbose
     pass
@@ -42,7 +49,10 @@ class CloudService:
     if r != l:
       raise ValueError(f"Remote path '{r}' does not match local path '{l}'.")
 
+
   def upload_file(self, remote_file_path: str, local_file_path: str):
+    if not self.write:
+      raise ValueError("Access denied. This service does not have write access.")
     r = os.path.basename(remote_file_path)
     l = os.path.basename(local_file_path)
     if r != l:
@@ -50,7 +60,6 @@ class CloudService:
 
 
   def sync_files(self, locality: str, local_folder: str, remote_folder: str, dry_run: bool = False, verbose: bool = False):
-
     # Build a dictionary of remote files: {relative_path: file}
     remote_files = {}
     if verbose:
@@ -97,7 +106,6 @@ class CloudService:
     for rel_path, file in remote_files.items():
 
       local_file_exists = False
-      local_file_path = None
 
       if rel_path in remote_file_map:
         local_file_path = remote_file_map[rel_path]["local"]
@@ -156,7 +164,7 @@ class CloudService:
           _print_download(file.name, local_file_path)
           if not dry_run:
             self.download_file(file, local_file_path)
-        elif local_mod_time_utc > remote_mod_time_utc:
+        elif self.write and (local_mod_time_utc > remote_mod_time_utc):
           if verbose:
             print("  Local file is newer. Uploading local version...")
           _print_upload(file.name, local_file_path)
@@ -170,7 +178,7 @@ class CloudService:
       if os.path.isdir(local_file_path):
         continue
 
-      if remote_path not in remote_files:
+      if self.write and (remote_path not in remote_files):
         # File exists in local only: upload it.
         if verbose:
           print(f"Remote file missing for local file '{local_file_path}'. Uploading...")

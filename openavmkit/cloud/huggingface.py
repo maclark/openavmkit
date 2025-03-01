@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 import requests
 from huggingface_hub import hf_hub_url, upload_file as hf_upload_file
 from huggingface_hub.hf_api import HfApi, RepoFolder
-from openavmkit.cloud.base import CloudCredentials, CloudService, CloudFile
+from openavmkit.cloud.base import CloudCredentials, CloudService, CloudFile, CloudAccess
+
 
 class HuggingFaceCredentials(CloudCredentials):
 
@@ -18,9 +19,10 @@ class HuggingFaceService(CloudService):
       self,
       credentials: HuggingFaceCredentials,
       repo_id: str,
+      access: CloudAccess,
       revision: str = "main"
   ):
-    super().__init__("huggingface", credentials)
+    super().__init__("huggingface", credentials, access)
     self.repo_id = repo_id
     self.revision = revision
     self.token = credentials.token
@@ -82,12 +84,13 @@ class HuggingFaceService(CloudService):
     )
 
 
-def init_service_huggingface(credentials: HuggingFaceCredentials):
+def init_service_huggingface(credentials: HuggingFaceCredentials, access: CloudAccess):
   repo_id = os.getenv("HF_REPO_ID")
   if repo_id is None:
     raise ValueError("Missing 'HF_REPO_ID' in environment")
   revision = os.getenv("HF_REVISION", "main")
-  return HuggingFaceService(credentials, repo_id, revision)
+  service = HuggingFaceService(credentials, repo_id, access, revision)
+  return service
 
 
 def get_creds_from_env_huggingface() -> HuggingFaceCredentials:

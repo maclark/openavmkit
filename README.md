@@ -9,6 +9,7 @@ Open AVM kit is a python library for real estate mass appraisal. It includes mod
 - [Usage](#usage)
   - [Using the code modules](#using-the-code-modules)
   - [Using the Jupyter notebooks](#using-the-jupyter-notebooks)
+  - [Configuring cloud storage](#configuring-cloud-storage)
 - [Running tests](#running-tests)
 - [Contributing](#contributing)
 - [License](#license)
@@ -217,6 +218,105 @@ Double-click on your chosen notebook to open it.
 
 For information on how to use Jupyter notebooks in general, refer to the [official Jupyter notebook documentation](https://jupyter-notebook.readthedocs.io/en/stable/).
  
+
+## Creating a new locality
+
+OpenAVMKit operates on the concept of a "locality", which is a geographic area that contains a set of properties. This can represent a city, a council, a neighborhood, or any other region or jurisdiction you want to analyze. To set one up, create a folder like this within openavmkit's `notebooks/` directory:
+
+```
+data/<locality_slug>/
+```
+
+Where `<locality_slug>` is a unique identifying name for your locality in a particularly opinionated format. That format is:
+
+```
+<country_code>-<state_or_province_code>-<locality_name>
+```
+
+- **Country code**: The 2-letter country code according to the [ISO 3166-1 standard](https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2). For example, the country code for the United States is `us`, and the country code for Norway is `no`.
+
+- **State/province code**: The 2-letter state or province code according to the [ISO 3166-2 standard](https://en.wikipedia.org/wiki/ISO_3166-2). For example, the state code for Texas is `tx`, and the state code for California is `ca`.
+
+- **Locality name**: A human-readable name for the locality itself.
+
+The slug itself should be all lowercase and contain no spaces or special characters other than underscores.
+
+Some examples:
+
+```
+us-nc-guilford    # Guilford County, North Carolina, USA
+us-tx-austin      # City of Austin, Texas, USA
+no-03-oslo        # City of Oslo, Norway
+no-50-orkdal      # Orkdal kommune (county), Norway
+```
+
+Once you have your locality set up, you will want to set it up like this (using `us-nc-guilford` as an example):
+
+```
+data/
+├──us-nc-guilford/
+    ├── in/
+    ├── out/
+    ├── settings.json
+```
+
+The `in/` directory is where you will put your raw data files.   
+The `out/` directory is where the output files will be saved.  
+The `settings.json` file will drive all your modeling and analysis decisions for the library. For now you can just put a blank `{}` in there so that it will load, but you will want to consult the documentation / tutorials for how to construct this file.
+
+
+## Configuring cloud storage
+
+`openavmkit` includes a module for working with remote storage services. At this time the library supports three cloud storage methods:
+
+- Microsoft Azure
+- Hugging Face
+- SFTP
+
+To configure cloud storage, you will need to create a file that stores your connection credentials (such as API keys or passwords). This file should be named `.env` and should be placed in the `notebooks/` directory. This file is already ignored by git, but do make sure you don't accidentally commit this file to the repository or share it with others, as it contains your sensitive login information!
+
+This file should be a plain text file formatted like this:
+```
+SOME_VARIABLE=some_value
+ANOTHER_VARIABLE=another_value
+YET_ANOTHER_VARIABLE=123
+```
+
+That's just an example of the format; here are the actual variables that it recognizes:
+
+| Variable Name | Description                                                                                       |
+|---------------|---------------------------------------------------------------------------------------------------|
+| `CLOUD_TYPE` | The type of cloud storage to use.<br>Legal values are: `azure`, `huggingface`, `sftp`             |
+| 'CLOUD_ACCESS' | The type of access your cloud storage account has.<br>Legal values are: `read_only`, `read_write` |
+| `AZURE_STORAGE_CONTAINER_NAME` | The name of the Azure storage container                                                           |
+| `AZURE_STORAGE_CONNECTION_STRING` | The connection string for the Azure storage account                                               |
+| `HF_TOKEN` | The Hugging Face API token                                                                        |
+| `HF_REPO_ID` | The Hugging Face repository ID                                                                    |
+| `SFTP_HOST` | The hostname of the SFTP server                                                                   |
+| `SFTP_USERNAME` | The username for the SFTP server                                                                  |
+| `SFTP_PASSWORD` | The password for the SFTP server                                                                  |
+| `SFTP_PORT` | The port number for the SFTP server                                                               |
+
+You only need to provide values for the service that you're actually using. For instance, here's what the file might look like if you are using Hugging Face:
+
+```
+CLOUD_TYPE=huggingface
+CLOUD_ACCESS=read_write
+HF_REPO_ID=landeconomics/localities-public
+HF_TOKEN=<YOUR_HUGGING_FACE_API_TOKEN>
+```
+
+If you're just getting started, you can just use read-only access to an existing public repository. Here's an example of how to access the public datasets provided by the [The Center for Land Economics](https://landeconomics.org):
+
+```
+CLOUD_TYPE=huggingface
+CLOUD_ACCESS=read_only
+HF_REPO_ID=landeconomics/localities
+```
+
+This will let you download the inputs for any of the Center for Land Economics' public datasets. Note that you will be unable to upload your changes and outputs to repositories that you have read-only access to.
+
+If you want to sync with your own cloud storage, you will need to set up your own hosting account and then provide the appropriate credentials in the `.env` file.
 
 ## Running tests
 
