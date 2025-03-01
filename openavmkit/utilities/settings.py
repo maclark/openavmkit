@@ -8,7 +8,7 @@ def load_settings(settings_file: str = "settings.json"):
     with open(settings_file, "r") as f:
       settings = json.load(f)
   except FileNotFoundError:
-    raise FileNotFoundError(f"Could not find settings file: {settings_file}. You need a settings file to proceed!")
+    raise FileNotFoundError(f"Could not find settings file: {settings_file}. Go to 'notebooks/data/<YOUR_LOCALITY>/' and create a settings.json file there!")
 
   template = _load_settings_template()
   # merge settings with template; settings will overwrite template values
