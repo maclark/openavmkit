@@ -39,10 +39,10 @@ python -m venv venv
 source venv/bin/activate
 ```
 
-_Windows: the slashes go the other direction_
+_Windows:_
 ```bash
 python -m venv venv
-source venv\Scripts\activate
+venv\Scripts\activate
 ```
 
 *_On a typical computer, there will be other programs that are using other versions of python and/or have their own conflicting versions of libraries that `openavmkit` might also need to use. To keep `openavmkit` from conflicting with your existing setup, we set up a 'virtual environment,' which is like a special bubble that is localized just to `openavmkit`. In this way `openavmkit` gets to use exactly the stuff it needs without messing with whatever else is already on your computer._
