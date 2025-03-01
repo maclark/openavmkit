@@ -4,8 +4,12 @@ from datetime import datetime
 
 def load_settings(settings_file: str = "settings.json"):
   # this assumes you've set your root directory already
-  with open(settings_file, "r") as f:
-    settings = json.load(f)
+  try:
+    with open(settings_file, "r") as f:
+      settings = json.load(f)
+  except FileNotFoundError:
+    raise FileNotFoundError(f"Could not find settings file: {settings_file}. You need a settings file to proceed!")
+
   template = _load_settings_template()
   # merge settings with template; settings will overwrite template values
   settings = _merge_settings(template, settings)
