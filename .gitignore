@@ -17,3 +17,5 @@ testing.ipynb
 notebooks/cache/
 
 notebooks/.env
+
+check_files_encoding.py

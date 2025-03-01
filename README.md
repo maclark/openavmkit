@@ -87,6 +87,28 @@ And you will return to your normal command prompt.
 
 ## 3. Install dependencies
 
+## Install Python
+
+If you don't have Python on your machine, you'll need to install it.
+
+The specific version of Python that openavmkit has been tested on is:
+> 3.12.9
+
+You can download that version of Python [here](https://www.python.org/downloads/release/python-3129/).
+
+If you already have Python installed, but you're not sure which version of Python you have installed, you can check by running this command:
+
+```bash
+python --version
+```
+
+If you have Python installed, you should see the version number printed to the console.
+
+If you have the wrong version of Python installed, you can download the correct version from the link above, and then install it. Be very careful to make sure that the new version of Python is available in your `PATH`. (If you don't know what the means, here is a [handy tutorial on the subject](https://realpython.com/add-python-to-path/)).
+
+
+## Install dependencies
+
 `openavmkit` uses a bunch of third-party libraries that you need to install. Python lets us list these in a text files so you can install them with one command. Here's how you can do that, using python's built-in `pip` tool, which manages your python libraries:
 
 ```bash
