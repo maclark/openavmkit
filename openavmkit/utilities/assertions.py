@@ -85,11 +85,20 @@ def dfs_are_equal(a: pd.DataFrame, b: pd.DataFrame, primary_key=None):
 		if not series_are_equal(a[col], b[col]):
 			old_val = pd.get_option('display.max_columns')
 			pd.set_option('display.max_columns', None)
-			print(f"Column {col} does not match, look:")
 
-			# print rows that are not equal:
-			print(a[~a[col].eq(b[col])])
-			print(b[~a[col].eq(b[col])])
+			bad_rows_a = a[~a[col].eq(b[col])]
+			bad_rows_b = b[~a[col].eq(b[col])]
+
+			if len(bad_rows_a) == 0 and len(bad_rows_b) == 0:
+				print(f"Column {col} does not match even though rows are naively equal, look:")
+				print(a[col])
+				print(b[col])
+			else:
+				print(f"Column {col} does not match, look:")
+				# print rows that are not equal:
+				print(bad_rows_a)
+				print(bad_rows_b)
+
 			pd.set_option('display.max_columns', old_val)
 
 			return False

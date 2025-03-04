@@ -95,6 +95,4 @@ def init_service_huggingface(credentials: HuggingFaceCredentials, access: CloudA
 
 def get_creds_from_env_huggingface() -> HuggingFaceCredentials:
   token = os.getenv("HF_TOKEN")
-  if not token:
-    raise ValueError("Missing 'HF_TOKEN' in environment")
   return HuggingFaceCredentials(token)

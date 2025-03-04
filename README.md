@@ -273,7 +273,9 @@ The `settings.json` file will drive all your modeling and analysis decisions for
 - Hugging Face
 - SFTP
 
-To configure cloud storage, you will need to create a file that stores your connection credentials (such as API keys or passwords). This file should be named `.env` and should be placed in the `notebooks/` directory. This file is already ignored by git, but do make sure you don't accidentally commit this file to the repository or share it with others, as it contains your sensitive login information!
+To configure cloud storage, you will need to create a file that stores your connection credentials (such as API keys or passwords). This file should be named `.env` and should be placed in the `notebooks/` directory.  
+
+This file is already ignored by git, but do make sure you don't accidentally commit this file to the repository or share it with others, as it contains your sensitive login information!
 
 This file should be a plain text file formatted like this:
 ```

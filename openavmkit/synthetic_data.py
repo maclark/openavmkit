@@ -4,6 +4,8 @@ from datetime import datetime as dt
 import numpy as np
 import pandas as pd
 
+from openavmkit.income import derive_prices
+from openavmkit.projection import project_trend
 from openavmkit.time_adjustment import _generate_days
 
 
@@ -368,3 +370,75 @@ def generate_basic(
 
 	sd = SyntheticData(df, df_time_land_mult, df_time_bldg_mult)
 	return sd
+
+
+def generate_income_sales(
+		count_per_year: int,
+		start_year: int,
+		end_year: int,
+		base_noi: float=50000,
+		noi_growth: float=0.02,
+		base_cap_rate: float=0.05,
+		cap_rate_growth: float=0.01,
+		holding_period: int=7,
+		target_irr: float=0.15
+):
+	transactions = []
+	hist_cap_rates = {}
+	noi = base_noi
+	hist_noi = {}
+	cap_rate = base_cap_rate
+
+	for year in range(start_year, end_year + 1):
+
+		hist_cap_rates[year] = cap_rate
+		hist_noi[year] = noi
+
+		# x years before now, capped at start year
+		start_lookback = max(start_year, year-holding_period)
+		recent_caps = []
+		recent_nois = []
+		for y in range(start_lookback, year+1):
+			recent_caps.append(hist_cap_rates[y])
+			recent_nois.append(hist_noi[y])
+		recent_caps = np.array(recent_caps)
+		recent_nois = np.array(recent_nois)
+
+		# naively extrapolate exit cap rate along linear trend of last X years
+		expected_exit_cap_rate = project_trend(recent_caps, len(recent_caps)+holding_period)
+
+		# naively extrapolate noi along linear trend of last X years
+		expected_exit_noi = project_trend(recent_nois, len(recent_nois)+holding_period)
+
+		# get expected annual growth rate over the holding period:
+		expected_noi_growth = (expected_exit_noi/noi) ** (1/holding_period) - 1
+
+		for i in range(0, count_per_year):
+			entry_price, _ = derive_prices(
+				target_irr,
+				expected_exit_cap_rate,
+				expected_exit_noi,
+				expected_noi_growth,
+				holding_period
+			)
+
+			transactions.append({
+				"sale_price": entry_price,
+				"sale_year": year,
+				"entry_noi": noi,
+				"holding_period": holding_period,
+				"expected_exit_noi": expected_exit_noi,
+				"expected_noi_growth": expected_noi_growth,
+				"expected_exit_cap_rate": expected_exit_cap_rate
+			})
+
+		# growth
+		noi = noi * (1 + noi_growth)
+		cap_rate = cap_rate * (1 + cap_rate_growth)
+
+	df_transactions = pd.DataFrame(data=transactions)
+
+	return {
+		"transactions": df_transactions,
+		"cap_rates": hist_cap_rates
+	}

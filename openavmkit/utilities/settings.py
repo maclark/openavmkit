@@ -4,7 +4,7 @@ import os
 import pandas as pd
 from datetime import datetime
 
-def load_settings(settings_file: str = "settings.json"):
+def load_settings(settings_file: str = "in/settings.json"):
   # this assumes you've set your root directory already
   try:
     with open(settings_file, "r") as f:
