@@ -322,7 +322,7 @@ def write_notebook_output_sup(sup: SalesUniversePair, prefix="1-assemble"):
    print(f"...out/look/{prefix}-sales.parquet")
 
 
-def cloud_sync(settings: dict, verbose: bool = False, dry_run: bool = False):
+def cloud_sync(locality: str, verbose: bool = False, dry_run: bool = False):
    """
    Syncs the data to the cloud.
    """
@@ -331,13 +331,8 @@ def cloud_sync(settings: dict, verbose: bool = False, dry_run: bool = False):
       print("Cloud service not initialized, skipping...")
       return
 
-   locality = settings.get("locality", {})
-   slug : str | None = locality.get("slug", None)
-   if slug is None:
-      raise ValueError("No slug found in the locality settings.")
-
-   remote_path = slug.replace("-", "/")
-   cloud_service.sync_files(slug,"in", remote_path, dry_run=dry_run, verbose=verbose)
+   remote_path = locality.replace("-", "/")
+   cloud_service.sync_files(locality,"in", remote_path, dry_run=dry_run, verbose=verbose)
 
 
 def read_pickle(path: str):
