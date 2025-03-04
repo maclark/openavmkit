@@ -249,7 +249,7 @@ def _apply_dd_to_df_cols(
   return df
 
 
-def _apply_dd_to_df_rows(
+def apply_dd_to_df_rows(
     df: pd.DataFrame,
     column: str,
     settings: dict,

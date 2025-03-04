@@ -11,17 +11,17 @@ from xgboost import XGBRegressor
 from openavmkit.data import get_important_field, get_locations, _read_split_keys, SalesUniversePair, \
 	get_hydrated_sales_from_sup, get_report_locations
 from openavmkit.modeling import run_mra, run_gwr, run_xgboost, run_lightgbm, run_catboost, SingleModelResults, \
-	run_garbage, \
-	run_average, run_naive_sqft, DataSplit, run_kernel, run_local_sqft, run_assessor, predict_garbage, \
-	GarbageModel, predict_average, AverageModel, predict_naive_sqft, predict_local_sqft, predict_assessor, predict_kernel, \
-	predict_gwr, predict_xgboost, predict_catboost, predict_lightgbm
+	run_garbage, run_average, run_naive_sqft, predict_garbage, \
+	run_kernel, run_local_sqft, run_assessor, predict_average, predict_naive_sqft, predict_local_sqft, \
+	predict_assessor, predict_kernel, predict_gwr, predict_xgboost, predict_catboost, predict_lightgbm, \
+	GarbageModel, AverageModel, DataSplit
 from openavmkit.reports import MarkdownReport, _markdown_to_pdf
 from openavmkit.time_adjustment import enrich_time_adjustment
 from openavmkit.utilities.data import div_z_safe, dataframe_to_markdown
 from openavmkit.utilities.format import fancy_format
 from openavmkit.utilities.modeling import NaiveSqftModel, LocalSqftModel, AssessorModel, GWRModel, MRAModel
 from openavmkit.utilities.settings import get_fields_categorical, get_variable_interactions, get_valuation_date, \
-	get_model_group, _apply_dd_to_df_rows, get_model_group_ids
+	get_model_group, apply_dd_to_df_rows, get_model_group_ids
 from openavmkit.utilities.stats import calc_vif_recursive_drop, calc_t_values_recursive_drop, \
 	calc_p_values_recursive_drop, calc_elastic_net_regularization, calc_correlations, calc_r2, \
 	calc_cross_validation_score, calc_cod
@@ -31,17 +31,40 @@ from openavmkit.utilities.timing import TimingData
 # Public:
 
 class BenchmarkResults:
+	"""
+  Container for benchmark results.
+
+  Attributes:
+      df_time (pd.DataFrame): DataFrame containing timing information.
+      df_stats_test (pd.DataFrame): DataFrame with statistics for the test set.
+      df_stats_full (pd.DataFrame): DataFrame with statistics for the full universe.
+  """
 	df_time: pd.DataFrame
 	df_stats_test: pd.DataFrame
 	df_stats_full: pd.DataFrame
 
 	def __init__(self, df_time: pd.DataFrame, df_stats_test: pd.DataFrame, df_stats_full: pd.DataFrame):
+		"""
+    Initialize a BenchmarkResults instance.
+
+    :param df_time: DataFrame containing timing data.
+    :type df_time: pandas.DataFrame
+    :param df_stats_test: DataFrame with test set statistics.
+    :type df_stats_test: pandas.DataFrame
+    :param df_stats_full: DataFrame with full universe statistics.
+    :type df_stats_full: pandas.DataFrame
+    """
 		self.df_time = df_time
 		self.df_stats_test = df_stats_test
 		self.df_stats_full = df_stats_full
 
-
 	def print(self) -> str:
+		"""
+    Return a formatted string summarizing the benchmark results.
+
+    :returns: A string that includes timings, test set stats, and universe set stats.
+    :rtype: str
+    """
 		result = "Timings:\n"
 		result += _format_benchmark_df(self.df_time)
 		result += "\n\n"
@@ -55,6 +78,13 @@ class BenchmarkResults:
 
 
 class MultiModelResults:
+	"""
+  Container for results from multiple models along with a benchmark.
+
+  Attributes:
+      model_results (dict[str, SingleModelResults]): Dictionary mapping model names to their results.
+      benchmark (BenchmarkResults): Benchmark results computed from the model results.
+  """
 	model_results: dict[str, SingleModelResults]
 	benchmark: BenchmarkResults
 
@@ -63,20 +93,34 @@ class MultiModelResults:
 			model_results: dict[str, SingleModelResults],
 			benchmark: BenchmarkResults
 	):
+		"""
+    Initialize a MultiModelResults instance.
+
+    :param model_results: Dictionary of individual model results.
+    :type model_results: dict[str, SingleModelResults]
+    :param benchmark: Benchmark results.
+    :type benchmark: BenchmarkResults
+    """
 		self.model_results = model_results
 		self.benchmark = benchmark
-
 
 	def add_model(
 			self,
 			model: str,
 			results: SingleModelResults
 	):
+		"""
+    Add a new model's results and update the benchmark.
+
+    :param model: The model name.
+    :type model: str
+    :param results: The results for the given model.
+    :type results: SingleModelResults
+    :returns: None
+    """
 		self.model_results[model] = results
-		# recalculate the benchmark
+		# Recalculate the benchmark based on updated model results.
 		self.benchmark = _calc_benchmark(self.model_results)
-
-
 
 
 def get_variable_recommendations(
@@ -88,15 +132,27 @@ def get_variable_recommendations(
 		verbose: bool = False
 ):
 	"""
-	Determines which variables are likely to be the most meaningful in a model.
-	:param df_sales: The sales data
-	:param df_universe: The parcel universe
-	:param vacant_only: Whether to only consider vacant sales
-	:param settings: The settings dictionary
-	:param model_group: The model group to consider
-	:param verbose:
-	:return:
-	"""
+  Determine which variables are most likely to be meaningful in a model.
+
+  This function examines sales and universe data, applies feature selection via
+  correlations, elastic net regularization, R², p-values, t-values, and VIF, and produces
+  a set of recommended variables along with a written report.
+
+  :param df_sales: The sales data.
+  :type df_sales: pandas.DataFrame
+  :param df_universe: The parcel universe data.
+  :type df_universe: pandas.DataFrame
+  :param vacant_only: Whether to consider only vacant sales.
+  :type vacant_only: bool
+  :param settings: The settings dictionary.
+  :type settings: dict
+  :param model_group: The model group to consider.
+  :type model_group: str
+  :param verbose: If True, prints additional debugging information.
+  :type verbose: bool, optional
+  :returns: A dictionary with keys "variables" (the best variables list) and "report" (the generated report).
+  :rtype: dict
+  """
 	if verbose:
 		print("")
 
@@ -123,7 +179,7 @@ def get_variable_recommendations(
 	# Elastic net regularization
 	enr_coefs = calc_elastic_net_regularization(X_sales, y_sales, thresh.get("enr", 0.01))
 
-	# R^2 values
+	# R² values
 	r2_values = calc_r2(ds.df_sales, ds.dep_vars, y_sales)
 
 	# P Values
@@ -162,17 +218,17 @@ def get_variable_recommendations(
 		worst_idx = df_results["weighted_score"].idxmin()
 		worst_variable = df_results.loc[worst_idx, "variable"]
 		curr_variables.remove(worst_variable)
-		# remove the variable from the dataframe:
+		# Remove the variable from the results dataframe.
 		df_results = df_results[df_results["variable"].ne(worst_variable)]
 		if verbose:
 			print(f"--> score: {cv_score:,.0f}  {len(curr_variables)} variables: {curr_variables}")
 
-	# make a table from the list of best variables:
+	# Create a table from the list of best variables.
 	df_best = pd.DataFrame(best_variables, columns=["Variable"])
 	df_best["Rank"] = range(1, len(df_best) + 1)
 	df_best["Description"] = df_best["Variable"]
-	df_best = _apply_dd_to_df_rows(df_best, "Variable", settings, ds.one_hot_descendants, "name")
-	df_best = _apply_dd_to_df_rows(df_best, "Description", settings, ds.one_hot_descendants, "description")
+	df_best = apply_dd_to_df_rows(df_best, "Variable", settings, ds.one_hot_descendants, "name")
+	df_best = apply_dd_to_df_rows(df_best, "Description", settings, ds.one_hot_descendants, "description")
 	df_best = df_best[["Rank", "Variable", "Description"]]
 	df_best.loc[
 		df_best["Variable"].eq(df_best["Description"]),
@@ -181,12 +237,7 @@ def get_variable_recommendations(
 	df_best.set_index("Rank", inplace=True)
 	report.set_var("summary_table", df_best.to_markdown())
 
-	report = generate_variable_report(
-		report,
-		settings,
-		model_group,
-		best_variables
-	)
+	report = generate_variable_report(report, settings, model_group, best_variables)
 
 	return {
 		"variables": best_variables,
@@ -200,14 +251,29 @@ def generate_variable_report(
 		model_group: str,
 		best_variables: list[str]
 ):
+	"""
+  Generate a variable selection report.
 
+  This function updates the markdown report with various threshold values, weights,
+  and summary tables based on the best variables.
+
+  :param report: The markdown report object.
+  :type report: MarkdownReport
+  :param settings: The settings dictionary.
+  :type settings: dict
+  :param model_group: The model group identifier.
+  :type model_group: str
+  :param best_variables: List of selected best variables.
+  :type best_variables: list[str]
+  :returns: The updated markdown report.
+  :rtype: MarkdownReport
+  """
 	locality = settings.get("locality", {})
 	report.set_var("locality", locality.get("name", "...LOCALITY..."))
 
 	mg = get_model_group(settings, model_group)
 	report.set_var("val_date", get_valuation_date(settings).strftime("%Y-%m-%d"))
 	report.set_var("model_group", mg.get("name", mg))
-
 
 	instructions = settings.get("modeling", {}).get("instructions", {})
 	feature_selection = instructions.get("feature_selection", {})
@@ -234,10 +300,7 @@ def generate_variable_report(
 	df_weights.set_index("Statistic", inplace=True)
 	report.set_var("pre_model_weights", df_weights.to_markdown())
 
-	# TODO: construct these
-	#summary_table = "...SUMMARY TABLE..."
-	#report.set_var("summary_table", summary_table)
-
+	# TODO: Construct summary and post-model tables as needed.
 	post_model_table = "...POST MODEL TABLE..."
 	report.set_var("post_model_table", post_model_table)
 
@@ -254,6 +317,36 @@ def run_models(
 		run_main: bool = True,
 		run_vacant: bool = True
 ):
+	"""
+  Runs predictive models on the given SalesUniversePair. This function takes detailed instructions from the provided
+	settings dictionary and handles all the internal details like splitting the data, training the models, and saving the
+	results. It performs basic statistic analysis on each model, and optionally combines results into an ensemble model.
+
+	If "run_main" is true, it will run normal models as well as hedonic models (if the user so specifies), "hedonic" in
+	this context meaning models that attempt to generate a land value and an improvement value separately. If "run_vacant"
+	is true, it will run vacant models as well -- models that only use vacant models as evidence to generate land values.
+
+  This function iterates over model groups and runs models for both main and vacant cases.
+
+  :param sup: Sales and universe data.
+  :type sup: SalesUniversePair
+  :param settings: The settings dictionary.
+  :type settings: dict
+  :param save_params: Whether to save model parameters.
+  :type save_params: bool, optional
+  :param use_saved_params: Whether to use saved model parameters.
+  :type use_saved_params: bool, optional
+  :param use_saved_results: Whether to use saved model results.
+  :type use_saved_results: bool, optional
+  :param verbose: If True, prints additional information.
+  :type verbose: bool, optional
+  :param run_main: Whether to run main (non-vacant) models.
+  :type run_main: bool, optional
+  :param run_vacant: Whether to run vacant models.
+  :type run_vacant: bool, optional
+  :returns: The MultiModelResults containing all model results and benchmarks.
+  :rtype: MultiModelResults
+  """
 	s = settings
 	s_model = s.get("modeling", {})
 	s_inst = s_model.get("instructions", {})
@@ -270,18 +363,25 @@ def run_models(
 			print(f"*** Running models for model_group: {model_group} ***")
 			print("")
 		for vacant_only in [False, True]:
-			if vacant_only:
-				if not run_vacant:
-					continue
-			else:
-				if not run_main:
-					continue
+			if vacant_only and not run_vacant:
+				continue
+			if not vacant_only and not run_main:
+				continue
 			_run_models(sup, model_group, settings, vacant_only, save_params, use_saved_params, use_saved_results, verbose)
 
-# Private:
+
+# Private functions:
 
 
 def _calc_benchmark(model_results: dict[str, SingleModelResults]):
+	"""
+  Calculate benchmark statistics from individual model results.
+
+  :param model_results: Dictionary mapping model names to SingleModelResults.
+  :type model_results: dict[str, SingleModelResults]
+  :returns: BenchmarkResults computed from the model results.
+  :rtype: BenchmarkResults
+  """
 	data_time = {
 		"model": [],
 		"total": [],
@@ -294,21 +394,21 @@ def _calc_benchmark(model_results: dict[str, SingleModelResults]):
 	}
 
 	data = {
-		"model":[],
-		"subset":[],
+		"model": [],
+		"subset": [],
 		"utility_score": [],
-		"count_sales":[],
-		"count_univ":[],
-		"mse":[],
-		"rmse":[],
-		"r2":[],
-		"adj_r2":[],
-		"median_ratio":[],
-		"cod":[],
-		"cod_trim":[],
-		"prd":[],
-		"prb":[],
-		"chd":[]
+		"count_sales": [],
+		"count_univ": [],
+		"mse": [],
+		"rmse": [],
+		"r2": [],
+		"adj_r2": [],
+		"median_ratio": [],
+		"cod": [],
+		"cod_trim": [],
+		"prd": [],
+		"prb": [],
+		"chd": []
 	}
 	for key in model_results:
 		for kind in ["test", "univ"]:
@@ -336,7 +436,6 @@ def _calc_benchmark(model_results: dict[str, SingleModelResults]):
 			data["prb"].append(pred_results.ratio_study.prb)
 
 			chd_results = None
-
 			if kind == "univ":
 				chd_results = results.chd
 				tim = results.timing.results
@@ -348,16 +447,13 @@ def _calc_benchmark(model_results: dict[str, SingleModelResults]):
 				data_time["univ"].append(tim.get("predict_univ"))
 				data_time["multi"].append(tim.get("predict_multi"))
 				data_time["chd"].append(tim.get("chd"))
-
 			data["chd"].append(chd_results)
 
 	df = pd.DataFrame(data)
-
 	df_test = df[df["subset"].eq("Test set")].drop(columns=["subset"])
 	df_full = df[df["subset"].eq("Universe set")].drop(columns=["subset"])
 	df_time = pd.DataFrame(data_time)
 
-	# set index to the model column:
 	df_test.set_index("model", inplace=True)
 	df_full.set_index("model", inplace=True)
 	df_time.set_index("model", inplace=True)
@@ -367,12 +463,18 @@ def _calc_benchmark(model_results: dict[str, SingleModelResults]):
 		df_test,
 		df_full
 	)
-
 	return results
 
 
 def _format_benchmark_df(df: pd.DataFrame):
+	"""
+  Format a benchmark DataFrame for display.
 
+  :param df: The DataFrame to format.
+  :type df: pandas.DataFrame
+  :returns: A markdown-formatted string representation of the DataFrame.
+  :rtype: str
+  """
 	formats = {
 		"utility_score": fancy_format,
 		"count_sales": "{:,.0f}",
@@ -397,12 +499,10 @@ def _format_benchmark_df(df: pd.DataFrame):
 
 	for col in df.columns:
 		if col in formats:
-			# check if formats[col] is a function or a string
 			if callable(formats[col]):
 				df[col] = df[col].apply(formats[col])
 			else:
 				df[col] = df[col].apply(lambda x: formats[col].format(x))
-
 	return df.transpose().to_markdown()
 
 
@@ -414,9 +514,25 @@ def _predict_one_model(
 		use_saved_results: bool = False,
 		verbose: bool = False
 ) -> SingleModelResults:
+	"""
+  Predict results for one model, using saved results if available.
 
+  :param smr: The single model results container.
+  :type smr: SingleModelResults
+  :param model: The model name.
+  :type model: str
+  :param outpath: Output directory path.
+  :type outpath: str
+  :param settings: The settings dictionary.
+  :type settings: dict
+  :param use_saved_results: If True, loads saved results if they exist.
+  :type use_saved_results: bool, optional
+  :param verbose: If True, prints additional output.
+  :type verbose: bool, optional
+  :returns: Updated SingleModelResults.
+  :rtype: SingleModelResults
+  """
 	model_name = model
-
 	out_pickle = f"{outpath}/model_{model_name}.pickle"
 	if use_saved_results and os.path.exists(out_pickle):
 		with open(out_pickle, "rb") as file:
@@ -424,7 +540,6 @@ def _predict_one_model(
 		return results
 
 	ds = smr.ds
-
 	timing = TimingData()
 	timing.start("total")
 
@@ -475,7 +590,6 @@ def _predict_one_model(
 		catboost_regressor: CatBoostRegressor = smr.model
 		results = predict_catboost(ds, catboost_regressor, timing, verbose)
 
-	# write out the results:
 	_write_model_results(results, outpath, settings)
 
 	with open(out_pickle, "wb") as file:
@@ -502,15 +616,50 @@ def _get_data_split_for(
 		hedonic: bool,
 		df_multiverse: pd.DataFrame | None = None
 ):
+	"""
+  Prepare a DataSplit object for a given model.
+
+  :param name: Model name.
+  :type name: str
+  :param model_group: The model group identifier.
+  :type model_group: str
+  :param location_fields: List of location fields.
+  :type location_fields: list[str] or None
+  :param dep_vars: List of dependent variables.
+  :type dep_vars: list[str]
+  :param df_sales: Sales DataFrame.
+  :type df_sales: pandas.DataFrame
+  :param df_universe: Universe DataFrame.
+  :type df_universe: pandas.DataFrame
+  :param settings: The settings dictionary.
+  :type settings: dict
+  :param ind_var: Independent variable for training.
+  :type ind_var: str
+  :param ind_var_test: Independent variable for testing.
+  :type ind_var_test: str
+  :param fields_cat: List of categorical fields.
+  :type fields_cat: list[str]
+  :param interactions: Dictionary of variable interactions.
+  :type interactions: dict
+  :param test_keys: Keys for test split.
+  :type test_keys: list[str]
+  :param train_keys: Keys for training split.
+  :type train_keys: list[str]
+  :param vacant_only: Whether to consider only vacant sales.
+  :type vacant_only: bool
+  :param hedonic: Whether to use hedonic pricing.
+  :type hedonic: bool
+  :param df_multiverse: Optional multiverse DataFrame.
+  :type df_multiverse: pandas.DataFrame or None
+  :returns: A DataSplit object.
+  :rtype: DataSplit
+  """
 	if name == "local_naive_sqft":
 		_dep_vars = location_fields + ["bldg_area_finished_sqft", "land_area_sqft"]
 	elif name == "local_smart_sqft":
 		_dep_vars = ["ss_id"] + location_fields + ["bldg_area_finished_sqft", "land_area_sqft"]
 	elif name == "assessor":
-		if hedonic:
-			_dep_vars = ["assr_land_value"]
-		else:
-			_dep_vars = ["assr_market_value"]
+		_dep_vars = ["assr_land_value"] if hedonic else ["assr_market_value"]
 	else:
 		_dep_vars = dep_vars
 
@@ -552,9 +701,49 @@ def _run_one_model(
 		verbose: bool = False,
 		hedonic: bool = False
 ) -> SingleModelResults | None:
+	"""
+  Run a single model based on provided parameters and return its results.
 
+  :param df_multiverse: Multiverse DataFrame.
+  :type df_multiverse: pandas.DataFrame
+  :param df_sales: Sales DataFrame.
+  :type df_sales: pandas.DataFrame
+  :param df_universe: Universe DataFrame.
+  :type df_universe: pandas.DataFrame
+  :param vacant_only: Whether to use only vacant sales.
+  :type vacant_only: bool
+  :param model_group: Model group identifier.
+  :type model_group: str
+  :param model: Model name.
+  :type model: str
+  :param model_entries: Dictionary of model configuration entries.
+  :type model_entries: dict
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param ind_var: Independent variable for training.
+  :type ind_var: str
+  :param ind_var_test: Independent variable for testing.
+  :type ind_var_test: str
+  :param best_variables: List of best variables selected.
+  :type best_variables: list[str]
+  :param fields_cat: List of categorical fields.
+  :type fields_cat: list[str]
+  :param outpath: Output path for saving results.
+  :type outpath: str
+  :param save_params: Whether to save parameters.
+  :type save_params: bool
+  :param use_saved_params: Whether to use saved parameters.
+  :type use_saved_params: bool
+  :param use_saved_results: Whether to load saved results if available.
+  :type use_saved_results: bool
+  :param verbose: If True, prints additional information.
+  :type verbose: bool, optional
+  :param hedonic: Whether to use hedonic pricing.
+  :type hedonic: bool, optional
+  :returns: SingleModelResults if successful, else None.
+  :rtype: SingleModelResults or None
+  """
 	model_name = model
-
 	out_pickle = f"{outpath}/model_{model_name}.pickle"
 	if use_saved_results and os.path.exists(out_pickle):
 		with open(out_pickle, "rb") as file:
@@ -568,7 +757,6 @@ def _run_one_model(
 		if entry is None:
 			raise ValueError(f"Model entry for {model} not found, and there is no default entry!")
 
-	# TODO: make this more elegant
 	if "*" in model:
 		sales_chase = 0.01
 		model_name = model.replace("*", "")
@@ -579,21 +767,17 @@ def _run_one_model(
 		print(f" running model {model} on {len(df_sales)} rows...")
 
 	are_dep_vars_default = entry.get("dep_vars", None) is None
-
-	dep_vars : list | None = entry.get("dep_vars", default_entry.get("dep_vars", None))
+	dep_vars: list | None = entry.get("dep_vars", default_entry.get("dep_vars", None))
 	if dep_vars is None:
 		raise ValueError(f"dep_vars not found for model {model}")
 
-	if are_dep_vars_default:
-		if verbose:
-			if set(dep_vars) != set(best_variables):
-				print(f"--> using default variables, auto-optimized variable list: {best_variables}")
+	if are_dep_vars_default and verbose:
+		if set(dep_vars) != set(best_variables):
+			print(f"--> using default variables, auto-optimized variable list: {best_variables}")
 		dep_vars = best_variables
 
 	interactions = get_variable_interactions(entry, settings, df_sales)
-
 	location_fields = get_locations(settings, df_sales)
-
 	test_keys, train_keys = _read_split_keys(model_group)
 
 	ds = _get_data_split_for(
@@ -653,7 +837,6 @@ def _run_one_model(
 	else:
 		raise ValueError(f"Model {model_name} not found!")
 
-	# write out the results:
 	_write_model_results(results, outpath, settings)
 
 	with open(out_pickle, "wb") as file:
@@ -663,9 +846,19 @@ def _run_one_model(
 
 
 def _assemble_model_results(results: SingleModelResults, settings: dict):
-	locations = get_report_locations(settings)
+	"""
+  Assemble model results into DataFrames for sales, universe, and test sets.
 
-	fields = ["key", "geometry", "prediction", "assr_market_value", "assr_market_land_value", "sale_price", "sale_price_time_adj", "sale_date"] + locations
+  :param results: Single model results.
+  :type results: SingleModelResults
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: A dictionary mapping keys ("sales", "universe", "test", and optionally "multiverse") to DataFrames.
+  :rtype: dict
+  """
+	locations = get_report_locations(settings)
+	fields = ["key", "geometry", "prediction", "assr_market_value", "assr_market_land_value", "sale_price",
+						"sale_price_time_adj", "sale_date"] + locations
 	fields = [field for field in fields if field in results.df_sales.columns]
 
 	dfs = {
@@ -698,6 +891,17 @@ def _assemble_model_results(results: SingleModelResults, settings: dict):
 
 
 def _write_model_results(results: SingleModelResults, outpath: str, settings: dict):
+	"""
+  Write model results to disk in parquet and CSV formats.
+
+  :param results: Single model results.
+  :type results: SingleModelResults
+  :param outpath: Output directory path.
+  :type outpath: str
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: None
+  """
 	dfs = _assemble_model_results(results, settings)
 	path = f"{outpath}/{results.type}"
 	if "*" in path:
@@ -717,6 +921,21 @@ def _write_ensemble_model_results(
 		dfs: dict[str, pd.DataFrame],
 		ensemble_list: list[str]
 ):
+	"""
+  Write ensemble model results to disk.
+
+  :param results: Single model results for the ensemble.
+  :type results: SingleModelResults
+  :param outpath: Output directory path.
+  :type outpath: str
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param dfs: Dictionary of DataFrames with ensemble predictions.
+  :type dfs: dict[str, pandas.DataFrame]
+  :param ensemble_list: List of models used in the ensemble.
+  :type ensemble_list: list[str]
+  :returns: None
+  """
 	dfs_basic = _assemble_model_results(results, settings)
 	path = f"{outpath}/{results.type}"
 	os.makedirs(path, exist_ok=True)
@@ -742,14 +961,40 @@ def _optimize_ensemble_allocation(
 		hedonic: bool = False,
 		ensemble_list: list[str] = None
 ):
+	"""
+  Select the models that produce the best land allocation results for an ensemble model.
+
+  :param df_sales: Sales DataFrame.
+  :type df_sales: pandas.DataFrame or None
+  :param df_universe: Universe DataFrame.
+  :type df_universe: pandas.DataFrame or None
+  :param model_group: Model group identifier.
+  :type model_group: str
+  :param vacant_only: Whether to use only vacant sales.
+  :type vacant_only: bool
+  :param ind_var: Independent variable for training.
+  :type ind_var: str
+  :param ind_var_test: Independent variable for testing.
+  :type ind_var_test: str
+  :param all_results: MultiModelResults containing individual model results.
+  :type all_results: MultiModelResults
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints additional information.
+  :type verbose: bool, optional
+  :param hedonic: Whether to use hedonic pricing.
+  :type hedonic: bool, optional
+  :param ensemble_list: Optional list of models to consider for the ensemble.
+  :type ensemble_list: list[str] or None
+  :returns: The best ensemble list.
+  :rtype: list[str]
+  """
 	timing = TimingData()
 	timing.start("total")
 	timing.start("setup")
 
 	if df_sales is None:
-		# get first key from all_results.model_results:
 		first_key = list(all_results.model_results.keys())[0]
-		# get the dataframes from the first model:
 		df_universe = all_results.model_results[first_key].ds.df_universe_orig
 		df_sales = all_results.model_results[first_key].ds.df_sales_orig
 
@@ -772,7 +1017,6 @@ def _optimize_ensemble_allocation(
 	)
 
 	vacant_status = "vacant" if vacant_only else "main"
-
 	df_test = ds.df_test
 	df_univ = ds.df_universe
 	instructions = settings.get("modeling", {}).get("instructions", {})
@@ -783,7 +1027,6 @@ def _optimize_ensemble_allocation(
 	if len(ensemble_list) == 0:
 		ensemble_list = [key for key in all_results.model_results.keys()]
 
-	# Never use an assessor's model in an ensemble!
 	if "assessor" in ensemble_list:
 		ensemble_list.remove("assessor")
 
@@ -819,6 +1062,30 @@ def _optimize_ensemble_allocation_iteration(
 		ensemble_list: list[str],
 		verbose: bool = False
 ):
+	"""
+  Perform one iteration of ensemble allocation optimization.
+
+  :param df_test: Test DataFrame.
+  :type df_test: pandas.DataFrame
+  :param df_univ: Universe DataFrame.
+  :type df_univ: pandas.DataFrame
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param all_results: MultiModelResults containing model results.
+  :type all_results: MultiModelResults
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param best_score: Current best score.
+  :type best_score: float
+  :param best_list: Current best ensemble list.
+  :type best_list: list[str]
+  :param ensemble_list: List of models to consider in this iteration.
+  :type ensemble_list: list[str]
+  :param verbose: If True, prints additional information.
+  :type verbose: bool, optional
+  :returns: Tuple containing best score and best ensemble list.
+  :rtype: tuple(float, list[str])
+  """
 	df_test_ensemble = df_test[["key"]].copy()
 	df_univ_ensemble = df_univ[["key"]].copy()
 	if len(ensemble_list) == 0:
@@ -900,20 +1167,44 @@ def _optimize_ensemble(
 		hedonic: bool = False,
 		ensemble_list: list[str] = None
 ):
+	"""
+  Optimize the ensemble allocation over all iterations.
+
+  :param df_sales: Sales DataFrame.
+  :type df_sales: pandas.DataFrame or None
+  :param df_universe: Universe DataFrame.
+  :type df_universe: pandas.DataFrame or None
+  :param model_group: Model group identifier.
+  :type model_group: str
+  :param vacant_only: Whether to use only vacant sales.
+  :type vacant_only: bool
+  :param ind_var: Independent variable for training.
+  :type ind_var: str
+  :param ind_var_test: Independent variable for testing.
+  :type ind_var_test: str
+  :param all_results: MultiModelResults containing model results.
+  :type all_results: MultiModelResults
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints additional information.
+  :type verbose: bool, optional
+  :param hedonic: Whether to use hedonic pricing.
+  :type hedonic: bool, optional
+  :param ensemble_list: Optional list of models to consider.
+  :type ensemble_list: list[str] or None
+  :returns: The best ensemble list.
+  :rtype: list[str]
+  """
 	timing = TimingData()
 	timing.start("total")
 	timing.start("setup")
 
 	if df_sales is None:
-		# get first key from all_results.model_results:
 		first_key = list(all_results.model_results.keys())[0]
-
-		# get the dataframes from the first model:
 		df_universe = all_results.model_results[first_key].ds.df_universe_orig
 		df_sales = all_results.model_results[first_key].ds.df_sales_orig
 
 	test_keys, train_keys = _read_split_keys(model_group)
-
 	ds = DataSplit(
 		df_sales,
 		df_universe,
@@ -931,7 +1222,6 @@ def _optimize_ensemble(
 	)
 
 	vacant_status = "vacant" if vacant_only else "main"
-
 	df_test = ds.df_test
 	df_univ = ds.df_universe
 	instructions = settings.get("modeling", {}).get("instructions", {})
@@ -942,7 +1232,6 @@ def _optimize_ensemble(
 	if len(ensemble_list) == 0:
 		ensemble_list = [key for key in all_results.model_results.keys()]
 
-	# Never use an assessor's model in an ensemble!
 	if "assessor" in ensemble_list:
 		ensemble_list.remove("assessor")
 
@@ -1060,14 +1349,43 @@ def _run_ensemble(
 		verbose: bool = False,
 		df_multiverse: pd.DataFrame = None
 ):
+	"""
+  Run the ensemble model based on the given ensemble list and write results.
+
+  :param df_sales: Sales DataFrame.
+  :type df_sales: pandas.DataFrame
+  :param df_universe: Universe DataFrame.
+  :type df_universe: pandas.DataFrame
+  :param model_group: Model group identifier.
+  :type model_group: str
+  :param vacant_only: Whether to use only vacant sales.
+  :type vacant_only: bool
+  :param hedonic: Whether to use hedonic pricing.
+  :type hedonic: bool
+  :param ind_var: Independent variable for training.
+  :type ind_var: str
+  :param ind_var_test: Independent variable for testing.
+  :type ind_var_test: str
+  :param outpath: Output path for results.
+  :type outpath: str
+  :param ensemble_list: List of models to include in the ensemble.
+  :type ensemble_list: list[str]
+  :param all_results: MultiModelResults containing model results.
+  :type all_results: MultiModelResults
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints additional information.
+  :type verbose: bool, optional
+  :param df_multiverse: Optional multiverse DataFrame.
+  :type df_multiverse: pandas.DataFrame or None
+  :returns: SingleModelResults for the ensemble.
+  :rtype: SingleModelResults
+  """
 	timing = TimingData()
-
 	timing.start("total")
-
 	timing.start("setup")
 
 	test_keys, train_keys = _read_split_keys(model_group)
-
 	ds = DataSplit(
 		df_sales,
 		df_universe,
@@ -1107,23 +1425,17 @@ def _run_ensemble(
 	timing.start("parameter_search")
 	timing.stop("parameter_search")
 	timing.start("train")
-
 	for m_key in ensemble_list:
 		m_results = all_results.model_results[m_key]
-
 		_df_test = m_results.df_test[["key"]].copy()
 		_df_test.loc[:, m_key] = m_results.pred_test.y_pred
-
 		_df_sales = m_results.df_sales[["key"]].copy()
 		_df_sales.loc[:, m_key] = m_results.pred_sales.y_pred
-
 		_df_univ = m_results.df_universe[["key"]].copy()
 		_df_univ.loc[:, m_key] = m_results.pred_univ
-
 		df_test_ensemble = df_test_ensemble.merge(_df_test, on="key", how="left")
 		df_sales_ensemble = df_sales_ensemble.merge(_df_sales, on="key", how="left")
 		df_univ_ensemble = df_univ_ensemble.merge(_df_univ, on="key", how="left")
-
 		if df_multi is not None:
 			_df_multi = m_results.df_multiverse[["key"]].copy()
 			_df_multi.loc[:, m_key] = m_results.pred_multi
@@ -1169,7 +1481,6 @@ def _run_ensemble(
 		"universe": df_univ_ensemble,
 		"test": df_test_ensemble,
 	}
-
 	if df_multi_ensemble is not None:
 		dfs["multiverse"] = df_multi_ensemble
 
@@ -1179,19 +1490,35 @@ def _run_ensemble(
 
 
 def _prepare_ds(
-	df_sales: pd.DataFrame,
-	df_universe: pd.DataFrame,
-	model_group: str,
-	vacant_only: bool,
-	settings: dict
+		df_sales: pd.DataFrame,
+		df_universe: pd.DataFrame,
+		model_group: str,
+		vacant_only: bool,
+		settings: dict
 ):
+	"""
+  Prepare a DataSplit object for modeling.
+
+  :param df_sales: Sales DataFrame.
+  :type df_sales: pandas.DataFrame
+  :param df_universe: Universe DataFrame.
+  :type df_universe: pandas.DataFrame
+  :param model_group: Model group identifier.
+  :type model_group: str
+  :param vacant_only: Whether to use only vacant sales.
+  :type vacant_only: bool
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: A DataSplit object.
+  :rtype: DataSplit
+  """
 	s = settings
 	s_model = s.get("modeling", {})
 	vacant_status = "vacant" if vacant_only else "main"
 	model_entries = s_model.get("models", {}).get(vacant_status, {})
 	entry: dict | None = model_entries.get("model", model_entries.get("default", {}))
 
-	dep_vars : list | None = entry.get("dep_vars", None)
+	dep_vars: list | None = entry.get("dep_vars", None)
 	if dep_vars is None:
 		raise ValueError(f"dep_vars not found for model 'default'")
 
@@ -1232,6 +1559,30 @@ def _calc_variable_recommendations(
 		vif_results: dict,
 		report: MarkdownReport = None
 ):
+	"""
+  Calculate variable recommendations based on various statistical metrics.
+
+  :param ds: DataSplit object containing the data.
+  :type ds: DataSplit
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param correlation_results: Correlation analysis results.
+  :type correlation_results: dict
+  :param enr_results: Elastic net regularization results.
+  :type enr_results: dict
+  :param r2_values_results: R² values DataFrame.
+  :type r2_values_results: pandas.DataFrame
+  :param p_values_results: P-value analysis results.
+  :type p_values_results: dict
+  :param t_values_results: T-value analysis results.
+  :type t_values_results: dict
+  :param vif_results: VIF analysis results.
+  :type vif_results: dict
+  :param report: Optional MarkdownReport object.
+  :type report: MarkdownReport or None
+  :returns: DataFrame with variable recommendations.
+  :rtype: pandas.DataFrame
+  """
 	feature_selection = settings.get("modeling", {}).get("instructions", {}).get("feature_selection", {})
 	thresh = feature_selection.get("thresholds", {})
 	weights = feature_selection.get("weights", {})
@@ -1271,9 +1622,7 @@ def _calc_variable_recommendations(
 	] = 1
 
 	df.loc[df["signs_match"].eq(1), "weighted_score"] += weight_coef_sign
-
 	df = df.sort_values(by="weighted_score", ascending=False)
-
 
 	if report is not None:
 		dfr = df.copy()
@@ -1358,7 +1707,7 @@ def _calc_variable_recommendations(
 			dfr_corr["Rank"] = range(1, len(dfr_corr) + 1)
 			dfr_corr = dfr_corr[["Rank", "Variable", "Strength", "Clarity", "Score", "Pass/Fail"]]
 			dfr_corr.set_index("Rank", inplace=True)
-			dfr_corr = _apply_dd_to_df_rows(dfr_corr, "Variable", settings, ds.one_hot_descendants)
+			dfr_corr = apply_dd_to_df_rows(dfr_corr, "Variable", settings, ds.one_hot_descendants)
 			report.set_var(f"table_corr_{state}", dataframe_to_markdown(dfr_corr))
 
 			# TODO: refactor this down to DRY it out a bit
@@ -1372,7 +1721,7 @@ def _calc_variable_recommendations(
 			dfr_vif["Rank"] = range(1, len(dfr_vif) + 1)
 			dfr_vif = dfr_vif[["Rank", "Variable", "VIF", "Pass/Fail"]]
 			dfr_vif.set_index("Rank", inplace=True)
-			dfr_vif = _apply_dd_to_df_rows(dfr_vif, "Variable", settings, ds.one_hot_descendants)
+			dfr_vif = apply_dd_to_df_rows(dfr_vif, "Variable", settings, ds.one_hot_descendants)
 			report.set_var(f"table_vif_{state}", dataframe_to_markdown(dfr_vif))
 
 			# P-value:
@@ -1385,7 +1734,7 @@ def _calc_variable_recommendations(
 			dfr_p_value["Rank"] = range(1, len(dfr_p_value) + 1)
 			dfr_p_value = dfr_p_value[["Rank", "Variable", "P-value", "Pass/Fail"]]
 			dfr_p_value.set_index("Rank", inplace=True)
-			dfr_p_value = _apply_dd_to_df_rows(dfr_p_value, "Variable", settings, ds.one_hot_descendants)
+			dfr_p_value = apply_dd_to_df_rows(dfr_p_value, "Variable", settings, ds.one_hot_descendants)
 			report.set_var(f"table_p_value_{state}", dataframe_to_markdown(dfr_p_value))
 
 			# T-value:
@@ -1398,7 +1747,7 @@ def _calc_variable_recommendations(
 			dfr_t_value["Rank"] = range(1, len(dfr_t_value) + 1)
 			dfr_t_value = dfr_t_value[["Rank", "Variable", "T-value", "Pass/Fail"]]
 			dfr_t_value.set_index("Rank", inplace=True)
-			dfr_t_value = _apply_dd_to_df_rows(dfr_t_value, "Variable", settings, ds.one_hot_descendants)
+			dfr_t_value = apply_dd_to_df_rows(dfr_t_value, "Variable", settings, ds.one_hot_descendants)
 			report.set_var(f"table_t_value_{state}", dataframe_to_markdown(dfr_t_value))
 
 			# ENR:
@@ -1410,7 +1759,7 @@ def _calc_variable_recommendations(
 			dfr_enr["Rank"] = range(1, len(dfr_enr) + 1)
 			dfr_enr = dfr_enr[["Rank", "Variable", "Coefficient", "Pass/Fail"]]
 			dfr_enr.set_index("Rank", inplace=True)
-			dfr_enr = _apply_dd_to_df_rows(dfr_enr, "Variable", settings, ds.one_hot_descendants)
+			dfr_enr = apply_dd_to_df_rows(dfr_enr, "Variable", settings, ds.one_hot_descendants)
 			report.set_var(f"table_enr_{state}", dataframe_to_markdown(dfr_enr))
 
 			# R-squared
@@ -1422,7 +1771,7 @@ def _calc_variable_recommendations(
 			dfr_r2["Rank"] = range(1, len(dfr_r2) + 1)
 			dfr_r2 = dfr_r2[["Rank", "Variable", "R-squared", "Pass/Fail"]]
 			dfr_r2.set_index("Rank", inplace=True)
-			dfr_r2 = _apply_dd_to_df_rows(dfr_r2, "Variable", settings, ds.one_hot_descendants)
+			dfr_r2 = apply_dd_to_df_rows(dfr_r2, "Variable", settings, ds.one_hot_descendants)
 			if state == "final":
 				dfr_r2 = dfr_r2[dfr_r2["Pass/Fail"].eq("✅")]
 			report.set_var(f"table_adj_r2_{state}", dataframe_to_markdown(dfr_r2))
@@ -1444,14 +1793,14 @@ def _calc_variable_recommendations(
 			dfr_coef_sign = dfr_coef_sign[["Variable", "ENR sign", "T-value sign", "Coef. sign", "Pass/Fail"]]
 			for field in ["ENR sign", "T-value sign", "Coef. sign"]:
 				dfr_coef_sign[field] = dfr_coef_sign[field].apply(lambda x: f"{x:.0f}").astype("string")
-			dfr_coef_sign = _apply_dd_to_df_rows(dfr_coef_sign, "Variable", settings, ds.one_hot_descendants)
+			dfr_coef_sign = apply_dd_to_df_rows(dfr_coef_sign, "Variable", settings, ds.one_hot_descendants)
 			if state == "final":
 				dfr_coef_sign = dfr_coef_sign[dfr_coef_sign["Pass/Fail"].eq("✅")]
 			report.set_var(f"table_coef_sign_{state}", dataframe_to_markdown(dfr_coef_sign))
 
 
 		dfr["Rank"] = range(1, len(dfr) + 1)
-		dfr = _apply_dd_to_df_rows(dfr, "Variable", settings, ds.one_hot_descendants)
+		dfr = apply_dd_to_df_rows(dfr, "Variable", settings, ds.one_hot_descendants)
 
 		dfr = dfr[["Rank", "Weighted Score", "Variable", "VIF", "P Value", "T Value", "ENR", "Correlation", "Coef. sign", "R-squared"]]
 		dfr.set_index("Rank", inplace=True)
@@ -1482,6 +1831,37 @@ def _run_hedonic_models(
 		verbose: bool = False,
 		df_multiverse: pd.DataFrame = None
 ):
+	"""
+  Run hedonic models and ensemble them, then update the benchmark.
+
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param model_group: Model group identifier.
+  :type model_group: str
+  :param vacant_only: Whether to use only vacant sales.
+  :type vacant_only: bool
+  :param models_to_run: List of models to run.
+  :type models_to_run: list[str]
+  :param all_results: MultiModelResults containing current model results.
+  :type all_results: MultiModelResults
+  :param df_sales: Sales DataFrame.
+  :type df_sales: pandas.DataFrame
+  :param df_universe: Universe DataFrame.
+  :type df_universe: pandas.DataFrame
+  :param ind_var: Independent variable for training.
+  :type ind_var: str
+  :param ind_var_test: Independent variable for testing.
+  :type ind_var_test: str
+  :param fields_cat: List of categorical fields.
+  :type fields_cat: list[str]
+  :param use_saved_results: Whether to use saved results if available.
+  :type use_saved_results: bool, optional
+  :param verbose: If True, prints additional information.
+  :type verbose: bool, optional
+  :param df_multiverse: Optional multiverse DataFrame.
+  :type df_multiverse: pandas.DataFrame or None
+  :returns: None
+  """
 	hedonic_results = {}
 	# Run hedonic models
 	outpath = f"out/models/{model_group}/hedonic"
@@ -1494,10 +1874,8 @@ def _run_hedonic_models(
 
 	# Re-run the models one by one and stash the results
 	for model in models_to_run:
-
 		if model not in all_results.model_results:
 			continue
-		
 		smr = all_results.model_results[model]
 		ds = _get_data_split_for(
 			name=model,
@@ -1517,16 +1895,12 @@ def _run_hedonic_models(
 			hedonic=True,
 			df_multiverse=df_multiverse
 		)
-
 		# We call this here because we are re-running prediction without first calling run(), which would call this
 		ds.split()
-
 		if len(ds.y_sales) < 15:
 			print(f"Skipping hedonic model because there are not enough sale records")
 			return
-
 		smr.ds = ds
-
 		results = _predict_one_model(
 			smr=smr,
 			model=model,
@@ -1542,7 +1916,6 @@ def _run_hedonic_models(
 		model_results=hedonic_results,
 		benchmark=_calc_benchmark(hedonic_results)
 	)
-
 	best_ensemble = _optimize_ensemble(
 		df_sales=df_sales,
 		df_universe=df_universe,
@@ -1555,7 +1928,6 @@ def _run_hedonic_models(
 		verbose=verbose,
 		hedonic=True
 	)
-
 	# Run the ensemble model
 	ensemble_results = _run_ensemble(
 		df_sales=df_sales,
@@ -1580,7 +1952,6 @@ def _run_hedonic_models(
 	# Calculate final results, including ensemble
 	print("HEDONIC BENCHMARK")
 	all_hedonic_results.add_model("ensemble", ensemble_results)
-
 	print(all_hedonic_results.benchmark.print())
 
 
@@ -1594,10 +1965,30 @@ def _run_models(
 		use_saved_results: bool = True,
 		verbose: bool = False
 ):
+	"""
+  Run models for a given model group and process ensemble results.
 
+  :param sup: Sales and universe data.
+  :type sup: SalesUniversePair
+  :param model_group: Model group identifier.
+  :type model_group: str
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param vacant_only: Whether to use only vacant sales.
+  :type vacant_only: bool, optional
+  :param save_params: Whether to save model parameters.
+  :type save_params: bool, optional
+  :param use_saved_params: Whether to use saved parameters.
+  :type use_saved_params: bool, optional
+  :param use_saved_results: Whether to use saved results if available.
+  :type use_saved_results: bool, optional
+  :param verbose: If True, prints additional information.
+  :type verbose: bool, optional
+  :returns: MultiModelResults containing all models and the final ensemble.
+  :rtype: MultiModelResults
+  """
 	df_univ = sup["universe"]
 	df_sales = get_hydrated_sales_from_sup(sup)
-
 	df_multi = df_univ.copy()
 
 	df_sales = df_sales[df_sales["model_group"].eq(model_group)].copy()
@@ -1609,7 +2000,7 @@ def _run_models(
 	vacant_status = "vacant" if vacant_only else "main"
 
 	ind_var = s_inst.get("ind_var", "sale_price")
-	ind_var_test = s_inst.get("ind_var_test", "sale_price")
+	ind_var_test = s_inst.get("ind_var_test", "sale_price_time_adj")
 	fields_cat = get_fields_categorical(s, df_univ)
 	models_to_run = s_inst.get(vacant_status, {}).get("run", None)
 	model_entries = s_model.get("models").get(vacant_status, {})

@@ -16,12 +16,26 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 matplotlib.use('Agg')
 
 
-def calc_chds(
-		df_in: pd.DataFrame,
-		field_cluster: str,
-		field_value: str
-):
-	# create a dataframe matching the index of df_in to store the results but containing only the cluster_id
+def calc_chds(df_in: pd.DataFrame, field_cluster: str, field_value: str):
+	"""
+  Calculate the Coefficient of Horizontal Dispersion (CHD) for each cluster in a DataFrame. CHD is the same statistic
+  as COD, the Coefficient of Dispersion, but calculated for horizontal equity clusters and used to measure horizontal
+  dispersion, on the theory that similar properties in similar locations should have similar valuations. The use of the
+  name "CHD" is chosen to avoid confusion because assessors strongly associate "COD" with sales ratio studies.
+
+  This function computes the CHD for each unique cluster in the input DataFrame based on the values in the specified
+  field.
+
+  :param df_in: Input DataFrame.
+  :type df_in: pandas.DataFrame
+  :param field_cluster: Name of the column representing cluster identifiers.
+  :type field_cluster: str
+  :param field_value: Name of the column containing the values for COD calculation.
+  :type field_value: str
+  :returns: A pandas Series of COD values for each row, aligned with df_in.
+  :rtype: pandas.Series
+  """
+	# Create a dataframe matching the index of df_in with only the cluster id.
 	df = df_in[[field_cluster]].copy()
 	df["chd"] = 0.0
 
@@ -36,7 +50,22 @@ def calc_chds(
 
 
 def quick_median_chd(df: pl.DataFrame, field_value: str, field_cluster: str) -> float:
-	# limit df to rows where field_value is not null/nan/etc
+	"""
+  Calculate the median CHD for groups in a Polars DataFrame.
+
+  This function filters out missing values for the given field, groups the data by the
+  specified cluster field, computes COD for each group, and returns the median COD value.
+
+  :param df: Input Polars DataFrame.
+  :type df: polars.DataFrame
+  :param field_value: Name of the field containing values for COD calculation.
+  :type field_value: str
+  :param field_cluster: Name of the field to group by.
+  :type field_cluster: str
+  :returns: The median COD value across all groups.
+  :rtype: float
+  """
+	# Filter out rows with missing values for field_value.
 	df = df.filter(~pd.isna(df[field_value]))
 
 	chds = (
@@ -54,6 +83,17 @@ def quick_median_chd(df: pl.DataFrame, field_value: str, field_cluster: str) -> 
 
 
 def calc_cod(values: np.ndarray) -> float:
+	"""
+  Calculate the Coefficient of Dispersion (COD) for an array of values.
+
+  COD is defined as the average absolute deviation from the median, divided by the median,
+  multiplied by 100. Special cases are handled if the median is zero.
+
+  :param values: Array of numeric values.
+  :type values: numpy.ndarray
+  :returns: The COD percentage.
+  :rtype: float
+  """
 	if len(values) == 0:
 		return float('nan')
 	median_value = np.median(values)
@@ -72,6 +112,23 @@ def calc_cod(values: np.ndarray) -> float:
 
 
 def calc_cod_bootstrap(values: np.ndarray, confidence_interval=0.95, iterations=10000, seed=777) -> (float, float, float):
+	"""
+  Calculate COD using bootstrapping.
+
+  This function bootstraps the input values (which means resampling with replacement) to generate a distribution of
+  CODs, then returns the median COD along with the lower and upper bounds of the confidence interval.
+
+  :param values: Array of numeric values.
+  :type values: numpy.ndarray
+  :param confidence_interval: The desired confidence level (default is 0.95).
+  :type confidence_interval: float, optional
+  :param iterations: Number of bootstrap iterations (default is 10000).
+  :type iterations: int, optional
+  :param seed: Random seed for reproducibility (default is 777).
+  :type seed: int, optional
+  :returns: A tuple containing the median COD, lower bound, and upper bound.
+  :rtype: tuple(float, float, float)
+  """
 	n = len(values)
 	if n == 0:
 		return float('nan'), float('nan'), float('nan')
@@ -87,6 +144,18 @@ def calc_cod_bootstrap(values: np.ndarray, confidence_interval=0.95, iterations=
 
 
 def calc_prd(predictions: np.ndarray, ground_truth: np.ndarray) -> float:
+	"""
+  Calculate the Price Related Differential (PRD).
+
+  PRD is computed as the ratio of the mean ratio to the weighted mean ratio of predictions to ground truth.
+
+  :param predictions: Array of predicted values.
+  :type predictions: numpy.ndarray
+  :param ground_truth: Array of ground truth values.
+  :type ground_truth: numpy.ndarray
+  :returns: The PRD value.
+  :rtype: float
+  """
 	ratios = predictions / ground_truth
 	mean_ratio = np.mean(ratios)
 	weighted_mean_ratio = np.sum(predictions) / np.sum(ground_truth)
@@ -95,6 +164,25 @@ def calc_prd(predictions: np.ndarray, ground_truth: np.ndarray) -> float:
 
 
 def calc_prd_bootstrap(predictions: np.ndarray, ground_truth: np.ndarray, confidence_interval=0.95, iterations=10000, seed=777) -> (float, float, float):
+	"""
+  Calculate PRD with bootstrapping.
+
+  This function bootstraps the prediction-to-ground_truth ratios to produce a distribution
+  of PRD values and returns the lower bound, median, and upper bound of the confidence interval.
+
+  :param predictions: Array of predicted values.
+  :type predictions: numpy.ndarray
+  :param ground_truth: Array of ground truth values.
+  :type ground_truth: numpy.ndarray
+  :param confidence_interval: The desired confidence level (default is 0.95).
+  :type confidence_interval: float, optional
+  :param iterations: Number of bootstrap iterations (default is 10000).
+  :type iterations: int, optional
+  :param seed: Random seed for reproducibility (default is 777).
+  :type seed: int, optional
+  :returns: A tuple containing the lower bound, median PRD, and upper bound.
+  :rtype: tuple(float, float, float)
+  """
 	np.random.seed(seed)
 	n = len(predictions)
 	ratios = predictions / ground_truth
@@ -109,6 +197,18 @@ def calc_prd_bootstrap(predictions: np.ndarray, ground_truth: np.ndarray, confid
 
 
 def trim_outliers(values: np.ndarray, lower_quantile: float = 0.25, upper_quantile: float = 0.75) -> np.ndarray:
+	"""
+  Trim outliers from an array of values based on quantile thresholds.
+
+  :param values: Input array of numeric values.
+  :type values: numpy.ndarray
+  :param lower_quantile: Lower quantile bound (default is 0.25).
+  :type lower_quantile: float, optional
+  :param upper_quantile: Upper quantile bound (default is 0.75).
+  :type upper_quantile: float, optional
+  :returns: Array with values outside the quantile bounds removed.
+  :rtype: numpy.ndarray
+  """
 	if len(values) == 0:
 		return values
 	lower_bound = np.quantile(values, lower_quantile)
@@ -117,7 +217,22 @@ def trim_outliers(values: np.ndarray, lower_quantile: float = 0.25, upper_quanti
 
 
 def calc_prb(predictions: np.ndarray, ground_truth: np.ndarray, confidence_interval: float = 0.95) -> (float, float, float):
+	"""
+  Calculate the PRB (Price Related Bias) metric using a regression-based approach.
 
+  This function fits an OLS model on the transformed ratios of predictions to ground truth,
+  then returns the PRB value along with its lower and upper confidence bounds.
+
+  :param predictions: Array of predicted values.
+  :type predictions: numpy.ndarray
+  :param ground_truth: Array of ground truth values.
+  :type ground_truth: numpy.ndarray
+  :param confidence_interval: Desired confidence interval (default is 0.95).
+  :type confidence_interval: float, optional
+  :returns: A tuple containing the PRB, its lower bound, and its upper bound.
+  :rtype: tuple(float, float, float)
+  :raises ValueError: If predictions and ground_truth lengths differ.
+  """
 	if len(predictions) != len(ground_truth):
 		raise ValueError("predictions and ground_truth must have the same length")
 
@@ -166,8 +281,16 @@ def calc_prb(predictions: np.ndarray, ground_truth: np.ndarray, confidence_inter
 	return prb, prb_lower, prb_upper
 
 
-def plot_correlation(corr: pd.DataFrame, title:str = "Correlation of Variables"):
-	# Set a custom color map
+def plot_correlation(corr: pd.DataFrame, title: str = "Correlation of Variables"):
+	"""
+  Plot a heatmap of a correlation matrix.
+
+  :param corr: Correlation matrix as a DataFrame.
+  :type corr: pandas.DataFrame
+  :param title: Title of the plot (default is "Correlation of Variables").
+  :type title: str, optional
+  :returns: None
+  """
 	cmap = sns.diverging_palette(220, 10, as_cmap=True)
 	cmap = cmap.reversed()
 
@@ -195,8 +318,23 @@ def plot_correlation(corr: pd.DataFrame, title:str = "Correlation of Variables")
 
 
 def calc_correlations(X: pd.DataFrame, threshold: float = 0.1, do_plots: bool = False):
-	X = X.copy()
+	"""
+  Calculate correlations and iteratively drop variables with low combined scores.
 
+  The function computes the correlation matrix of X, then calculates a combined score
+  based on the strength of the correlation with the target variable and the clarity (average
+  correlation with other variables). Variables with a score below the threshold are dropped.
+
+  :param X: Input DataFrame with variables.
+  :type X: pandas.DataFrame
+  :param threshold: Minimum acceptable combined score for variables (default is 0.1).
+  :type threshold: float, optional
+  :param do_plots: If True, plots initial and final correlation heatmaps.
+  :type do_plots: bool, optional
+  :returns: A dictionary with keys "initial" (first run scores) and "final" (final score DataFrame).
+  :rtype: dict
+  """
+	X = X.copy()
 	first_run = None
 
 	while True:
@@ -267,6 +405,21 @@ def calc_correlations(X: pd.DataFrame, threshold: float = 0.1, do_plots: bool = 
 
 
 def calc_elastic_net_regularization(X: pd.DataFrame, y: pd.Series, threshold_fraction: float = 0.05):
+	"""
+  Calculate Elastic Net regularization coefficients while iteratively dropping variables with low coefficients.
+
+  The function standardizes X, fits an Elastic Net model, and iteratively removes variables
+  whose absolute coefficients are below a fraction of the maximum coefficient.
+
+  :param X: Input features DataFrame.
+  :type X: pandas.DataFrame
+  :param y: Target variable series.
+  :type y: pandas.Series
+  :param threshold_fraction: Fraction of the maximum coefficient below which variables are dropped (default is 0.05).
+  :type threshold_fraction: float, optional
+  :returns: A dictionary with keys "initial" (first run coefficients) and "final" (final coefficients DataFrame).
+  :rtype: dict
+  """
 	X = X.copy()
 
 	# Standardize the features
@@ -319,33 +472,56 @@ def calc_elastic_net_regularization(X: pd.DataFrame, y: pd.Series, threshold_fra
 
 
 def calc_r2(df: pd.DataFrame, variables: list[str], y: pd.Series):
+	"""
+  Calculate R² and adjusted R² values for each variable.
 
+  For each variable in the provided list, an OLS model is fit and the R²,
+  adjusted R², and the sign of the coefficient are recorded.
+
+  :param df: DataFrame containing the variables.
+  :type df: pandas.DataFrame
+  :param variables: List of variable names to evaluate.
+  :type variables: list[str]
+  :param y: Target variable series.
+  :type y: pandas.Series
+  :returns: A DataFrame with columns for variable, R², adjusted R², and coefficient sign.
+  :rtype: pandas.DataFrame
+  """
 	results = {
 		"variable": [],
 		"r2": [],
 		"adj_r2": [],
 		"coef_sign": []
 	}
-
 	for var in variables:
 		X = df[var].copy()
 		X = sm.add_constant(X)
 		X = X.astype(np.float64)
 		model = sm.OLS(y, X).fit()
-		r2 = model.rsquared
-		adj_r2 = model.rsquared_adj
-		coef = model.params[var]
-		coef_sign = 1 if coef >= 0 else -1
 		results["variable"].append(var)
-		results["r2"].append(r2)
-		results["adj_r2"].append(adj_r2)
-		results["coef_sign"].append(coef_sign)
-
+		results["r2"].append(model.rsquared)
+		results["adj_r2"].append(model.rsquared_adj)
+		results["coef_sign"].append(1 if model.params[var] >= 0 else -1)
 	df_results = pd.DataFrame(data=results)
 	return df_results
 
 
 def calc_p_values_recursive_drop(X: pd.DataFrame, y: pd.Series, sig_threshold: float = 0.05):
+	"""
+  Recursively drop variables with p-values above a specified significance threshold.
+
+  Fits an OLS model on X and drops the variable with the highest p-value iteratively
+  until all p-values are below the threshold.
+
+  :param X: Input features DataFrame.
+  :type X: pandas.DataFrame
+  :param y: Target variable series.
+  :type y: pandas.Series
+  :param sig_threshold: Significance threshold for p-values (default is 0.05).
+  :type sig_threshold: float, optional
+  :returns: A dictionary with keys "initial" and "final" containing DataFrames of p-values.
+  :rtype: dict
+  """
 	X = X.copy()
 	X = sm.add_constant(X)
 	X = X.astype(np.float64)
@@ -380,6 +556,18 @@ def calc_p_values_recursive_drop(X: pd.DataFrame, y: pd.Series, sig_threshold: f
 
 
 def calc_t_values_recursive_drop(X: pd.DataFrame, y: pd.Series, threshold: float = 2):
+	"""
+  Recursively drop variables with t-values below a given threshold.
+
+  :param X: Input features DataFrame.
+  :type X: pandas.DataFrame
+  :param y: Target variable series.
+  :type y: pandas.Series
+  :param threshold: Minimum acceptable t-value (default is 2).
+  :type threshold: float, optional
+  :returns: A dictionary with keys "initial" and "final" containing DataFrames of t-values and their signs.
+  :rtype: dict
+  """
 	X = X.copy()
 	X = sm.add_constant(X)
 	X = X.astype(np.float64)
@@ -419,12 +607,33 @@ def calc_t_values_recursive_drop(X: pd.DataFrame, y: pd.Series, threshold: float
 
 
 def calc_t_values(X: pd.DataFrame, y: pd.Series):
+	"""
+  Calculate t-values for an OLS model.
+
+  :param X: Input features DataFrame (should include constant term).
+  :type X: pandas.DataFrame
+  :param y: Target variable series.
+  :type y: pandas.Series
+  :returns: A pandas Series of t-values.
+  :rtype: pandas.Series
+  """
 	linear_model = sm.OLS(y, X)
 	fitted_model = linear_model.fit()
 	return fitted_model.tvalues
 
 
 def calc_vif_recursive_drop(X: pd.DataFrame, threshold: float = 10):
+	"""
+  Recursively drop variables with a Variance Inflation Factor (VIF) exceeding the threshold.
+
+  :param X: Input features DataFrame.
+  :type X: pandas.DataFrame
+  :param threshold: Maximum acceptable VIF (default is 10).
+  :type threshold: float, optional
+  :returns: A dictionary with keys "initial" and "final" containing VIF DataFrames.
+  :rtype: dict
+  :raises ValueError: If no columns remain for VIF calculation.
+  """
 	X = X.copy()
 	X = X.astype(np.float64)
 
@@ -434,14 +643,12 @@ def calc_vif_recursive_drop(X: pd.DataFrame, threshold: float = 10):
 	# If no columns are left after removing constant columns or dropping NaN values, raise an error
 	if X.shape[1] == 0:
 		raise ValueError("All columns are constant or have missing values; VIF cannot be computed.")
-
 	first_run = None
 	while True:
 		vif_data = calc_vif(X)
 		if first_run is None:
 			first_run = vif_data
-		max_vif = vif_data["vif"].max()
-		if max_vif > threshold:
+		if vif_data["vif"].max() > threshold:
 			max_vif_idx = vif_data["vif"].idxmax()
 			X = X.drop(X.columns[max_vif_idx], axis=1)
 		else:
@@ -453,7 +660,14 @@ def calc_vif_recursive_drop(X: pd.DataFrame, threshold: float = 10):
 
 
 def calc_vif(X: pd.DataFrame):
-	# Create an empty dataframe for storing VIF values
+	"""
+  Calculate the Variance Inflation Factor (VIF) for each variable in a DataFrame.
+
+  :param X: Input features DataFrame.
+  :type X: pandas.DataFrame
+  :returns: A DataFrame with variables and their VIF values.
+  :rtype: pandas.DataFrame
+  """
 	vif_data = pd.DataFrame()
 	vif_data["variable"] = X.columns
 
@@ -469,10 +683,32 @@ def calc_vif(X: pd.DataFrame):
 
 
 def calc_mse(prediction: np.ndarray, ground_truth: np.ndarray):
+	"""
+  Calculate the Mean Squared Error (MSE) between predictions and ground truth.
+
+  :param prediction: Array of predicted values.
+  :type prediction: numpy.ndarray
+  :param ground_truth: Array of true values.
+  :type ground_truth: numpy.ndarray
+  :returns: The MSE value.
+  :rtype: float
+  """
 	return np.mean((prediction - ground_truth) ** 2)
 
 
 def calc_cross_validation_score(X, y):
+	"""
+  Calculate cross validation score using negative mean squared error.
+
+  This function fits a LinearRegression model using 5-fold cross validation and returns the positive MSE.
+
+  :param X: Input features.
+  :type X: array-like or pandas.DataFrame
+  :param y: Target variable.
+  :type y: array-like or pandas.Series
+  :returns: The mean cross validation MSE.
+  :rtype: float
+  """
 	model = LinearRegression()
 	# Use negative MSE and negate it to return positive MSE
 	try:
