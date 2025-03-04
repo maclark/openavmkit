@@ -1398,6 +1398,7 @@ def _tag_model_groups_sup(
 		sales_index = resolve_filter(df_sales_hydrated, _filter)
 		df_sales_hydrated.loc[idx_no_model_group & sales_index, "model_group"] = mg_id
 
+	os.makedirs("out/look", exist_ok=True)
 	df_univ.to_parquet("out/look/tag-univ-0.parquet")
 
 	old_model_group = df_univ[["key", "model_group"]]
