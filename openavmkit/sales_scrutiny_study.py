@@ -246,7 +246,7 @@ class SalesScrutinyStudy:
     vacant_type = "vacant" if key == "v" else "improved"
     outpath = f"{path}/sales_scrutiny_{vacant_type}"
 
-    finish_report(report, outpath, "sales_scrutiny", settings)
+    finish_report(report, outpath, "sales_scrutiny", self.settings)
 
 
 def calc_sales_scrutiny(df_in: pd.DataFrame, sales_field: str):
