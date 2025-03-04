@@ -18,7 +18,6 @@ from rasterio import features
 
 import pandas as pd
 import geopandas as gpd
-from IPython.core.display_functions import display
 from geopandas import GeoDataFrame
 from rasterio.transform import from_origin
 from scipy.ndimage import gaussian_filter

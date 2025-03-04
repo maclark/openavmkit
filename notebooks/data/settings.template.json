@@ -78,6 +78,9 @@
 				"bldg_condition_num",
 				"bldg_age_years"
 			]
+		},
+		"report": {
+			"formats": ["pdf", "html", "md"]
 		}
 	},
 	"field_classification": {

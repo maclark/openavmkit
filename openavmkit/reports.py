@@ -1,5 +1,6 @@
 import importlib.resources
 import os
+import warnings
 
 import markdown
 import pdfkit
@@ -57,28 +58,41 @@ def start_report(report_name: str, settings: dict, model_group: str):
   return report
 
 
-def finish_report(report: MarkdownReport, outpath: str, css_file: str):
+def finish_report(report: MarkdownReport, outpath: str, css_file: str, settings: dict):
+
+  formats = settings.get("analysis", {}).get("report", {}).get("formats", None)
+  if formats is None:
+    formats = ["pdf", "md"]
+
   report_text = report.render()
   os.makedirs(outpath, exist_ok=True)
   with open(f"{outpath}.md", "w", encoding="utf-8") as f:
     f.write(report_text)
   pdf_path = f"{outpath}.pdf"
-  _markdown_to_pdf(report_text, pdf_path, css_file=css_file)
-  # remove the markdown:
-  os.remove(f"{outpath}.md")
 
+  try:
+    _markdown_to_pdf(report_text, pdf_path, formats=formats, css_file=css_file)
+  except OSError:
+    warnings.warn("Failed to generate PDF report. Is `wkhtmltopdf` installed? See the README for details.")
+
+  if "md" not in formats:
+    os.remove(f"{outpath}.md")
 
 # Private
 
 
-def _markdown_to_pdf(md_text, out_path, css_file=None):
+def _markdown_to_pdf(md_text, out_path, formats, css_file=None):
   html_text = _markdown_to_html(md_text, css_file)
   html_path = out_path.replace(".pdf", ".html")
   with open(html_path, "w", encoding="utf-8") as html_file:
     html_file.write(html_text)
-  _html_to_pdf(html_text, out_path)
-  # delete the html:
-  os.remove(html_path)
+
+  if "pdf" in formats:
+    _html_to_pdf(html_text, out_path)
+
+  if "html" not in formats:
+    # delete the html:
+    os.remove(html_path)
 
 
 def _markdown_to_html(md_text, css_file_stub=None):

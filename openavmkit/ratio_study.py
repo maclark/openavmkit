@@ -475,4 +475,4 @@ def _write_ratio_study_report(all_results: dict, settings: dict, model_group: st
 
 		outpath = f"{path}/reports/ratio_study"
 
-		finish_report(report, outpath, "ratio_study")
+		finish_report(report, outpath, "ratio_study", settings)
