@@ -9,10 +9,11 @@ import matplotlib
 from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import StandardScaler
 
-matplotlib.use('TkAgg')  # Set the interactive backend
 from matplotlib import pyplot as plt
 from sklearn.linear_model import ElasticNet, LinearRegression
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+matplotlib.use('Agg')
 
 
 def calc_chds(
