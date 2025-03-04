@@ -11,8 +11,8 @@ Open AVM kit is a python library for real estate mass appraisal. It includes mod
   - [Using the Jupyter notebooks](#using-the-jupyter-notebooks)
   - [Configuring cloud storage](#configuring-cloud-storage)
 - [Running tests](#running-tests)
-- [Contributing](#contributing)
-- [License](#license)
+- [Contributing](CONTRIBUTING.md)
+- [License](LICENSE)
 
 # Installation
 
@@ -289,7 +289,7 @@ That's just an example of the format; here are the actual variables that it reco
 | Variable Name | Description                                                                                       |
 |---------------|---------------------------------------------------------------------------------------------------|
 | `CLOUD_TYPE` | The type of cloud storage to use.<br>Legal values are: `azure`, `huggingface`, `sftp`             |
-| 'CLOUD_ACCESS' | The type of access your cloud storage account has.<br>Legal values are: `read_only`, `read_write` |
+| `CLOUD_ACCESS` | The type of access your cloud storage account has.<br>Legal values are: `read_only`, `read_write` |
 | `AZURE_STORAGE_CONTAINER_NAME` | The name of the Azure storage container                                                           |
 | `AZURE_STORAGE_CONNECTION_STRING` | The connection string for the Azure storage account                                               |
 | `HF_TOKEN` | The Hugging Face API token                                                                        |

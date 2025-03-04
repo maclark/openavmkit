@@ -9,7 +9,7 @@ These are my goals:
 - Be useful to governments, policymakers, researchers, students, and analysts
 - Keep commercial companies from using it while not contributing to its development
 
-Commercial companies are free to use the software for any purpose, they just need to contribute back in some way. That means contribute back any code changes they make, should they make any. And if they don't like that idea, well, they can pay the maintainers some money or work out some other agreement. This is the dual licensing model I have chosen.
+Commercial companies are free to use the software for any purpose, they just need to follow the terms of the license. That generally means contributing back any code changes they make. Those who don't want to do that can pay the maintainers some money or work out some other agreement. This is the dual licensing model I have chosen.
 
 This isn't the only choice I could have made. Let's look at the alternatives:
 
@@ -43,7 +43,7 @@ Given my goals, the **dual-licensed** model of shipping simultaneously under an 
 
 That doesn't mean there aren't downsides, even from my own perspective. Most notably, there are many developers who categorically refuse to sign the contributor license agreement (CLA) mandated by the dual-licensed model.
 
-These are all valid concerns, and I respect those who feel that way. To these we must add this: opinions aside, the CLA adds extra friction to the contribution process, and this will discourage some contributors all by itself.
+These are all valid concerns, and I respect those who feel that way. To these I must add this: opinions aside, the CLA adds extra friction to the contribution process, and this will discourage some contributors all by itself.
 
 I am willing to accept this downside for a few reasons:
 
