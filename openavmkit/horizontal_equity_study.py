@@ -7,6 +7,17 @@ from openavmkit.utilities.data import do_per_model_group
 
 
 class HorizontalEquitySummary:
+	"""
+  Summary statistics for horizontal equity analysis.
+
+  Attributes:
+      rows (int): Total number of rows in the input DataFrame.
+      clusters (int): Total number of clusters identified.
+      min_chd (float): Minimum CHD (Coefficient of Horizontal Dispersion) value of any cluster.
+      max_chd (float): Maximum CHD value of any cluster.
+      median_chd (float): Median CHD value of all clusters.
+  """
+
 	rows: int
 	clusters: int
 	min_chd: float
@@ -21,6 +32,20 @@ class HorizontalEquitySummary:
 			max_chd: float,
 			median_chd: float
 	):
+		"""
+    Initialize a HorizontalEquitySummary instance.
+
+    :param rows: Total number of rows in the DataFrame.
+    :type rows: int
+    :param clusters: Total number of clusters.
+    :type clusters: int
+    :param min_chd: Minimum COD value.
+    :type min_chd: float
+    :param max_chd: Maximum COD value.
+    :type max_chd: float
+    :param median_chd: Median COD value.
+    :type median_chd: float
+    """
 		self.rows = rows
 		self.clusters = clusters
 		self.min_chd = min_chd
@@ -29,6 +54,18 @@ class HorizontalEquitySummary:
 
 
 class HorizontalEquityClusterSummary:
+	"""
+  Summary for an individual horizontal equity cluster.
+
+  Attributes:
+      id (str): Identifier of the cluster.
+      count (int): Number of records in the cluster.
+      chd (float): CHD value for the cluster.
+      min (float): Minimum value in the cluster.
+      max (float): Maximum value in the cluster.
+      median (float): Median value in the cluster.
+  """
+
 	id: str
 	count: int
 	chd: float
@@ -45,6 +82,22 @@ class HorizontalEquityClusterSummary:
 			max: float,
 			median: float
 	):
+		"""
+    Initialize a HorizontalEquityClusterSummary instance.
+
+    :param id: Cluster identifier.
+    :type id: str
+    :param count: Number of records in the cluster.
+    :type count: int
+    :param chd: COD value for the cluster.
+    :type chd: float
+    :param min: Minimum value in the cluster.
+    :type min: float
+    :param max: Maximum value in the cluster.
+    :type max: float
+    :param median: Median value in the cluster.
+    :type median: float
+    """
 		self.id = id
 		self.count = count
 		self.chd = chd
@@ -54,6 +107,14 @@ class HorizontalEquityClusterSummary:
 
 
 class HorizontalEquityStudy:
+	"""
+  Perform horizontal equity analysis and summarize the results.
+
+  Attributes:
+      summary (HorizontalEquitySummary): Overall summary statistics.
+      cluster_summaries (dict[str, HorizontalEquityClusterSummary]): Dictionary mapping cluster IDs to their summaries.
+  """
+
 	summary: HorizontalEquitySummary
 	cluster_summaries: dict[str, HorizontalEquityClusterSummary]
 
@@ -63,6 +124,16 @@ class HorizontalEquityStudy:
 			field_cluster: str,
 			field_value: str
 	):
+		"""
+    Initialize a HorizontalEquityStudy instance by computing cluster summaries.
+
+    :param df: Input DataFrame containing data for horizontal equity analysis.
+    :type df: pandas.DataFrame
+    :param field_cluster: Column name indicating cluster membership.
+    :type field_cluster: str
+    :param field_value: Column name of the values to analyze.
+    :type field_value: str
+    """
 		clusters = df[field_cluster].unique()
 		self.cluster_summaries = {}
 
@@ -107,6 +178,21 @@ def mark_horizontal_equity_clusters_per_model_group_sup(
 		settings: dict,
 		verbose: bool = False
 ):
+	"""
+  Mark horizontal equity clusters on the 'universe' DataFrame of a SalesUniversePair.
+
+  Updates the 'universe' DataFrame with horizontal equity clusters by calling
+  :func:`mark_horizontal_equity_clusters` and then sets the updated DataFrame in sup.
+
+  :param sup: SalesUniversePair containing sales and universe data.
+  :type sup: SalesUniversePair
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints progress information.
+  :type verbose: bool, optional
+  :returns: Updated SalesUniversePair with marked horizontal equity clusters.
+  :rtype: SalesUniversePair
+  """
 	df_universe = sup["universe"]
 	df_universe = mark_horizontal_equity_clusters(df_universe, settings, verbose)
 	sup.set("universe", df_universe)
@@ -114,10 +200,39 @@ def mark_horizontal_equity_clusters_per_model_group_sup(
 
 
 def mark_horizontal_equity_clusters_per_model_group(df_in: pd.DataFrame, settings: dict, verbose: bool = False):
+	"""
+  Mark horizontal equity clusters for each model group within the DataFrame.
+
+  Applies the :func:`_mark_he_ids` function on each model group subset using :func:`do_per_model_group`.
+
+  :param df_in: Input DataFrame.
+  :type df_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints progress information.
+  :type verbose: bool, optional
+  :returns: DataFrame with horizontal equity cluster IDs marked.
+  :rtype: pandas.DataFrame
+  """
 	return do_per_model_group(df_in, settings, _mark_he_ids, {"settings": settings, "verbose": verbose}, verbose)
 
 
 def mark_horizontal_equity_clusters(df: pd.DataFrame, settings: dict, verbose: bool = False):
+	"""
+  Compute and mark horizontal equity clusters in the DataFrame.
+
+  Uses clustering (via :func:`make_clusters`) based on a location field and categorical/numeric fields specified
+  in settings to generate a horizontal equity cluster ID which is stored in the "he_id" column.
+
+  :param df: Input DataFrame.
+  :type df: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints progress information.
+  :type verbose: bool, optional
+  :returns: DataFrame with a new "he_id" column.
+  :rtype: pandas.DataFrame
+  """
 	he = settings.get("analysis", {}).get("horizontal_equity", {})
 	location = he.get("location", "neighborhood")
 	fields_categorical = he.get("fields_categorical", [])
@@ -127,6 +242,19 @@ def mark_horizontal_equity_clusters(df: pd.DataFrame, settings: dict, verbose: b
 
 
 def _mark_he_ids(df_in: pd.DataFrame, model_group: str, settings: dict, verbose: bool):
+	"""
+  Append the model group identifier to the horizontal equity cluster IDs.
+
+  :param df_in: Input DataFrame with horizontal equity clusters already marked.
+  :type df_in: pandas.DataFrame
+  :param model_group: The model group identifier.
+  :type model_group: str
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints progress information.
+  :type verbose: bool
+  :returns: DataFrame with updated "he_id" column that includes the model group.
+  :rtype: None
+  """
 	df = mark_horizontal_equity_clusters(df_in, settings, verbose)
 	df["he_id"] = model_group + "_" + df["he_id"]
-
