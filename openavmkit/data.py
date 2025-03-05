@@ -19,15 +19,44 @@ from openavmkit.utilities.geometry import get_crs, clean_geometry, identify_irre
 from openavmkit.utilities.settings import get_fields_categorical, get_fields_impr, get_fields_boolean, \
 	get_fields_numeric, get_model_group_ids, get_fields_date, get_long_distance_unit, get_valuation_date
 
+
 @dataclass
 class SalesUniversePair:
+	"""
+  A container for the sales and universe DataFrames, many functions operate on this data structure. This data structure
+  is necessary because the sales and universe DataFrames are often used together and need to be passed around together.
+  The sales represent transactions and any known data at the time of the transaction, while the universe represents the
+  current state of all parcels. The sales dataframe specifically allows for duplicate primary parcel keys, since an
+  individual parcel may have sold multiple times. The universe dataframe should have no duplicate primary parcel keys.
+
+  Attributes:
+      sales (pd.DataFrame): DataFrame containing sales data.
+      universe (pd.DataFrame): DataFrame containing universe (parcel) data.
+  """
 	sales: pd.DataFrame
 	universe: pd.DataFrame
 
 	def __getitem__(self, key):
+		"""
+    Allow dictionary-like access to attributes.
+
+    :param key: Attribute name, either "sales" or "universe".
+    :type key: str
+    :returns: The corresponding DataFrame.
+    :rtype: pd.DataFrame
+    """
 		return getattr(self, key)
 
 	def set(self, key, value):
+		"""
+    Set the sales or universe DataFrame.
+
+    :param key: Either "sales" or "universe".
+    :type key: str
+    :param value: The new DataFrame.
+    :type value: pd.DataFrame
+    :raises ValueError: If an invalid key is provided.
+    """
 		if key == "sales":
 			self.sales = value
 		elif key == "universe":
@@ -36,27 +65,31 @@ class SalesUniversePair:
 			raise ValueError(f"Invalid key: {key}")
 
 	def update_sales(self, new_sales: pd.DataFrame):
+		"""
+    Update the sales DataFrame with new information as an overlay without redundancy.
 
-		# This function lets you push updates to "sales" while keeping it as an "overlay" that doesn't contain any redundant information
+    This function lets you push updates to "sales" while keeping it as an "overlay" that doesn't contain any redundant information.
 
-		# First we note what fields were in sales last time
+    - First we note what fields were in sales last time.
+    - Then we note what sales are in universe but were not in sales.
+    - Finally, we determine the new fields generated in new_sales that are not in the previous sales or in the universe.
+    - A modified version of df_sales is created with only two changes:
+      - Reduced to the correct selection of keys.
+      - Addition of the newly generated fields.
+
+    TODO: add support for "key_sale".
+
+    :param new_sales: New sales DataFrame with updates.
+    :type new_sales: pd.DataFrame
+    :returns: None
+    """
 		old_fields = self.sales.columns.values
-
-		# We note what sales are in universe but were not in sales
 		univ_fields = [field for field in self.universe.columns.values if field not in old_fields]
-
-		# Note the new fields generated -- these are the fields that are in new_sales but not in old_sales nor in the universe
 		new_fields = [field for field in new_sales.columns.values if field not in old_fields and field not in univ_fields]
-
-		# Create a modified version of df_sales with only two changes:
-		# - reduced to the correct selection of keys
-		# - adds the newly generated fields
-
-		# TODO: add support for "key_sale"
 		return_keys = new_sales["key"].values
 		reconciled = new_sales.copy()
 		reconciled = reconciled[reconciled["key"].isin(return_keys)]
-		reconciled = combine_dfs(reconciled, new_sales[["key"]+new_fields])
+		reconciled = combine_dfs(reconciled, new_sales[["key"] + new_fields])
 		self.sales = reconciled
 
 
@@ -64,6 +97,22 @@ SUPKey = Literal["sales", "universe"]
 
 
 def get_hydrated_sales_from_sup(sup: SalesUniversePair):
+	"""
+  Merge the sales and universe DataFrames to "hydrate" the sales data. The sales data represents transactions and any
+  known data at the time of the transaction, while the universe data represents the current state of all parcels. When
+  we merge the two sets, the sales data overrides any existing data in the universe data. This is useful for creating
+  a "hydrated" sales DataFrame that contains all the information available at the time of the sale (it is assumed that
+  any difference between the current state of the parcel and the state at the time of the sale is accounted for in the
+  sales data).
+
+  If the merged DataFrame contains a "geometry" column and the original sales did not,
+  the result is converted to a GeoDataFrame.
+
+  :param sup: SalesUniversePair containing sales and universe DataFrames.
+  :type sup: SalesUniversePair
+  :returns: The merged (hydrated) sales DataFrame.
+  :rtype: pd.DataFrame or gpd.GeoDataFrame
+  """
 	df_sales = sup["sales"]
 	df_univ = sup["universe"]
 	df_merged = combine_dfs(df_sales, df_univ, False, index="key")
@@ -76,6 +125,21 @@ def get_hydrated_sales_from_sup(sup: SalesUniversePair):
 
 
 def enrich_time(df: pd.DataFrame, time_formats: dict, settings: dict) -> pd.DataFrame:
+	"""
+  Enrich the DataFrame by converting specified time fields to datetime and deriving additional fields.
+
+  For each key in time_formats, converts the column to datetime. Then, if a field with the prefix "sale" exists,
+  enriches the dataframe with additional time fields (e.g., "sale_year", "sale_month", "sale_age_days").
+
+  :param df: Input DataFrame.
+  :type df: pd.DataFrame
+  :param time_formats: Dictionary mapping field names to datetime formats.
+  :type time_formats: dict
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: DataFrame with enriched time fields.
+  :rtype: pd.DataFrame
+  """
 	for key in time_formats:
 		time_format = time_formats[key]
 		if key in df:
@@ -96,14 +160,28 @@ def enrich_time(df: pd.DataFrame, time_formats: dict, settings: dict) -> pd.Data
 
 
 def simulate_removed_buildings(df: pd.DataFrame, settings: dict, idx_vacant: Series = None):
+	"""
+  Simulate removed buildings by changing improvement fields to values that reflect the absence of a building.
 
+  For all improvement fields, fills categorical fields with "UNKNOWN", numeric fields with 0, and boolean fields with
+  False for the rows specified by idx_vacant (or all rows if idx_vacant is None).
+
+  :param df: Input DataFrame.
+  :type df: pd.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param idx_vacant: Optional Series indicating which rows are vacant.
+  :type idx_vacant: pandas.Series, optional
+  :returns: Updated DataFrame.
+  :rtype: pandas.DataFrame
+  """
 	if idx_vacant is None:
 		# do the whole thing:
 		idx_vacant = df.index
 
 	fields_impr = get_fields_impr(settings, df)
 
-	# Step 3: fill unknown values for categorical improvements:
+	# fill unknown values for categorical improvements:
 	fields_impr_cat = fields_impr["categorical"]
 	fields_impr_num = fields_impr["numeric"]
 	fields_impr_bool = fields_impr["boolean"]
@@ -121,6 +199,14 @@ def simulate_removed_buildings(df: pd.DataFrame, settings: dict, idx_vacant: Ser
 
 
 def get_sale_field(settings: dict) -> str:
+	"""
+  Determine the appropriate sale price field ("sale_price" or "sale_price_time_adj") based on time adjustment settings.
+
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: Field name to be used for sale price.
+  :rtype: str
+  """
 	ta = settings.get("modeling", {}).get("instructions", {}).get("time_adjustment", {})
 	use = ta.get("use", True)
 	if use:
@@ -128,7 +214,19 @@ def get_sale_field(settings: dict) -> str:
 	return "sale_price"
 
 
-def get_vacant_sales(df_in: pd.DataFrame, settings: dict, invert:bool = False) -> pd.DataFrame:
+def get_vacant_sales(df_in: pd.DataFrame, settings: dict, invert: bool = False) -> pd.DataFrame:
+	"""
+  Filter the sales DataFrame to return only vacant (unimproved) sales.
+
+  :param df_in: Input DataFrame.
+  :type df_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param invert: If True, return non-vacant (improved) sales.
+  :type invert: bool, optional
+  :returns: Filtered DataFrame containing (or excluding) vacant sales.
+  :rtype: pandas.DataFrame
+  """
 	df = df_in.copy()
 	df = _boolify_column_in_df(df, "vacant_sale")
 	idx_vacant_sale = df["vacant_sale"].eq(True)
@@ -138,14 +236,24 @@ def get_vacant_sales(df_in: pd.DataFrame, settings: dict, invert:bool = False) -
 	return df_vacant_sales
 
 
-def get_vacant(df_in: pd.DataFrame, settings: dict, invert:bool = False) -> pd.DataFrame:
-	# TODO : support custom vacant filter from user settings
-	df = df_in.copy()
+def get_vacant(df_in: pd.DataFrame, settings: dict, invert: bool = False) -> pd.DataFrame:
+	"""
+  Filter the DataFrame based on the 'is_vacant' column.
 
+  :param df_in: Input DataFrame.
+  :type df_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param invert: If True, return non-vacant rows.
+  :type invert: bool, optional
+  :returns: DataFrame filtered by the 'is_vacant' flag.
+  :rtype: pandas.DataFrame
+  :raises ValueError: If 'is_vacant' column is not boolean.
+  """
+	df = df_in.copy()
 	is_vacant_dtype = df["is_vacant"].dtype
 	if is_vacant_dtype != bool:
 		raise ValueError(f"The 'is_vacant' column must be a boolean type (found: {is_vacant_dtype})")
-
 	idx_vacant = df["is_vacant"].eq(True)
 	if invert:
 		idx_vacant = ~idx_vacant
@@ -154,6 +262,22 @@ def get_vacant(df_in: pd.DataFrame, settings: dict, invert:bool = False) -> pd.D
 
 
 def get_sales(df_in: pd.DataFrame, settings: dict, vacant_only: bool = False) -> pd.DataFrame:
+	"""
+  Retrieve valid sales from the input DataFrame.
+
+  Filters for sales with a positive sale price, valid_sale marked True.
+  If vacant_only is True, only includes rows where vacant_sale is True. Also simulates removed buildings if applicable.
+
+  :param df_in: Input DataFrame containing sales.
+  :type df_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param vacant_only: If True, return only vacant sales.
+  :type vacant_only: bool, optional
+  :returns: Filtered DataFrame of valid sales.
+  :rtype: pandas.DataFrame
+  :raises ValueError: If required boolean columns are not of boolean type.
+  """
 	df = df_in.copy()
 	valid_sale_dtype = df["valid_sale"].dtype
 	if valid_sale_dtype != bool:
@@ -166,18 +290,10 @@ def get_sales(df_in: pd.DataFrame, settings: dict, vacant_only: bool = False) ->
 		# check for vacant sales:
 		idx_vacant_sale = df["vacant_sale"].eq(True)
 		df = simulate_removed_buildings(df, settings, idx_vacant_sale)
+		# if a property was NOT vacant at time of sale, but is vacant now, then the sale is invalid:
+		df.loc[~idx_vacant_sale & df["is_vacant"].eq(True), "valid_sale"] = False
 
-		# if a property was NOT vacant at time of sale, but is vacant now, then the sale is invalid, because we don't
-		# know e.g. what the square footage was at the time of sale
-		# TODO: deal with this better when we support frozen characteristics
-		df.loc[
-			~idx_vacant_sale &
-			df["is_vacant"].eq(True),
-			"valid_sale"
-		] = False
-
-	# get the sales
-	df_sales : pd.DataFrame = df[
+	df_sales: pd.DataFrame = df[
 		df["sale_price"].gt(0) &
 		df["valid_sale"].eq(True) &
 		(df["vacant_sale"].eq(True) if vacant_only else True)
@@ -187,6 +303,17 @@ def get_sales(df_in: pd.DataFrame, settings: dict, vacant_only: bool = False) ->
 
 
 def get_report_locations(settings: dict, df: pd.DataFrame = None) -> list[str]:
+	"""
+  Retrieve report location fields from settings. These are location fields that will be used in report breakdowns, such
+  as for ratio studies.
+
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param df: Optional DataFrame to filter available locations.
+  :type df: pandas.DataFrame, optional
+  :returns: List of report location field names.
+  :rtype: list[str]
+  """
 	locations = settings.get("field_classification", {}).get("important", {}).get("report_locations", [])
 	if df is not None:
 		locations = [loc for loc in locations if loc in df]
@@ -194,6 +321,16 @@ def get_report_locations(settings: dict, df: pd.DataFrame = None) -> list[str]:
 
 
 def get_locations(settings: dict, df: pd.DataFrame = None) -> list[str]:
+	"""
+  Retrieve location fields from settings. These are all the fields that are considered locations.
+
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param df: Optional DataFrame to filter available locations.
+  :type df: pandas.DataFrame, optional
+  :returns: List of location field names.
+  :rtype: list[str]
+  """
 	locations = settings.get("field_classification", {}).get("important", {}).get("locations", [])
 	if df is not None:
 		locations = [loc for loc in locations if loc in df]
@@ -201,6 +338,16 @@ def get_locations(settings: dict, df: pd.DataFrame = None) -> list[str]:
 
 
 def get_important_fields(settings: dict, df: pd.DataFrame = None) -> list[str]:
+	"""
+  Retrieve important field names from settings.
+
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param df: Optional DataFrame to filter fields.
+  :type df: pandas.DataFrame, optional
+  :returns: List of important field names.
+  :rtype: list[str]
+  """
 	imp = settings.get("field_classification", {}).get("important", {})
 	fields = imp.get("fields", {})
 	list_fields = []
@@ -213,6 +360,19 @@ def get_important_fields(settings: dict, df: pd.DataFrame = None) -> list[str]:
 
 
 def get_important_field(settings: dict, field_name: str, df: pd.DataFrame = None) -> str | None:
+	"""
+  Retrieve the important field name for a given field alias from settings. For instance if you are using school district
+  as your market area, you would look up "loc_market_area", which should be set to "school_district" in your settings.
+
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param field_name: Identifier for the field.
+  :type field_name: str
+  :param df: Optional DataFrame to check field existence.
+  :type df: pandas.DataFrame, optional
+  :returns: The mapped field name if found, else None.
+  :rtype: str or None
+  """
 	imp = settings.get("field_classification", {}).get("important", {})
 	other_name = imp.get("fields", {}).get(field_name, None)
 	if df is not None:
@@ -224,6 +384,15 @@ def get_important_field(settings: dict, field_name: str, df: pd.DataFrame = None
 
 
 def get_field_classifications(settings: dict):
+	"""
+  Retrieve a mapping of field names to their classifications (land, improvement or other) as well as their types
+  (numeric, categorical, or boolean).
+
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: Dictionary mapping field names to type and class.
+  :rtype: dict
+  """
 	field_map = {}
 	for ftype in ["land", "impr", "other"]:
 		nums = get_fields_numeric(settings, None, False, [ftype])
@@ -239,6 +408,14 @@ def get_field_classifications(settings: dict):
 
 
 def get_dtypes_from_settings(settings: dict):
+	"""
+  Generate a dictionary mapping fields to their designated data types based on settings.
+
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: Dictionary of field names to data type strings.
+  :rtype: dict
+  """
 	cats = get_fields_categorical(settings, include_boolean=False)
 	bools = get_fields_boolean(settings)
 	nums = get_fields_numeric(settings, include_boolean=False)
@@ -252,21 +429,31 @@ def get_dtypes_from_settings(settings: dict):
 	return dtypes
 
 
-def process_data(dataframes: dict[str : pd.DataFrame], settings: dict, verbose: bool = False) -> SalesUniversePair:
+def process_data(dataframes: dict[str, pd.DataFrame], settings: dict, verbose: bool = False) -> SalesUniversePair:
 	"""
-	Process the data from the settings.
-	"""
+  Process raw dataframes according to settings and return a SalesUniversePair.
+
+  :param dataframes: Dictionary mapping keys to DataFrames.
+  :type dataframes: dict[str, pd.DataFrame]
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints progress information.
+  :type verbose: bool, optional
+  :returns: A SalesUniversePair containing processed sales and universe data.
+  :rtype: SalesUniversePair
+  :raises ValueError: If required merge instructions or columns are missing.
+  """
 	s_data = settings.get("data", {})
 	s_process = s_data.get("process", {})
 	s_merge = s_process.get("merge", {})
 
-	merge_univ : list | None = s_merge.get("universe", None)
-	merge_sales : list | None = s_merge.get("sales", None)
+	merge_univ: list | None = s_merge.get("universe", None)
+	merge_sales: list | None = s_merge.get("sales", None)
 
 	if merge_univ is None:
-		raise ValueError(f"No \"universe\" merge instructions found. data.process.merge must have exactly two keys: \"universe\", and \"sales\"")
+		raise ValueError("No \"universe\" merge instructions found. data.process.merge must have exactly two keys: \"universe\", and \"sales\"")
 	if merge_sales is None:
-		raise ValueError(f"No \"sales\" merge instructions found. data.process.merge must have exactly two keys: \"universe\", and \"sales\"")
+		raise ValueError("No \"sales\" merge instructions found. data.process.merge must have exactly two keys: \"universe\", and \"sales\"")
 
 	df_univ = _merge_dict_of_dfs(dataframes, merge_univ, settings)
 	df_sales = _merge_dict_of_dfs(dataframes, merge_sales, settings)
@@ -278,15 +465,32 @@ def process_data(dataframes: dict[str : pd.DataFrame], settings: dict, verbose: 
 
 	df_sales = df_sales[df_sales["valid_sale"].eq(True)].copy().reset_index(drop=True)
 
-	sup : SalesUniversePair = SalesUniversePair(universe=df_univ, sales=df_sales)
-
+	sup: SalesUniversePair = SalesUniversePair(universe=df_univ, sales=df_sales)
 	enrich_data(sup, s_process.get("enrich", {}), dataframes, settings, verbose=verbose)
 
 	return sup
 
 
-def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str : pd.DataFrame], settings: dict, verbose: bool = False) -> SalesUniversePair:
-	supkeys : list[SUPKey] = ["universe", "sales"]
+def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str, pd.DataFrame], settings: dict, verbose: bool = False) -> SalesUniversePair:
+	"""
+  Enrich both sales and universe data based on enrichment instructions.
+
+  Applies enrichment operations (e.g., spatial and basic enrichment) to both "sales" and "universe" DataFrames.
+
+  :param sup: SalesUniversePair containing sales and universe data.
+  :type sup: SalesUniversePair
+  :param s_enrich: Enrichment instructions.
+  :type s_enrich: dict
+  :param dataframes: Dictionary of additional DataFrames.
+  :type dataframes: dict[str, pd.DataFrame]
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints progress information.
+  :type verbose: bool, optional
+  :returns: Enriched SalesUniversePair.
+  :rtype: SalesUniversePair
+  """
+	supkeys: list[SUPKey] = ["universe", "sales"]
 
 	# Add the "both" entries to both "universe" and "sales" and delete the "both" entry afterward.
 	if "both" in s_enrich:
@@ -299,55 +503,34 @@ def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str : p
 					# Check if the key already exists on "sales" or "universe"
 					raise ValueError(f"Cannot enrich '{key}' twice -- found in both \"both\" and \"{supkey}\". Please remove one.")
 				entry = s_both[key]
-
 				# add the entry from "both" to both the "sales" & "universe" entry
 				sup_entry2 = s_enrich2.get(supkey, {})
 				sup_entry2[key] = entry
 				s_enrich2[supkey] = sup_entry2
-
-		del s_enrich2["both"] # remove the now-redundant "both" key
+		del s_enrich2["both"]  # remove the now-redundant "both" key
 		s_enrich = s_enrich2
 
 	for supkey in supkeys:
 		if verbose:
 			print(f"Enriching {supkey}...")
 		df = sup[supkey]
-		s_enrich_local : dict | None = s_enrich.get(supkey, None)
+		s_enrich_local: dict | None = s_enrich.get(supkey, None)
 		if s_enrich_local is not None:
-
-			df = _enrich_df_geometry(
-				df,
-				s_enrich_local,
-				dataframes,
-				settings,
-				verbose=verbose
-			)
-
-			df = _enrich_df_basic(
-				df,
-				s_enrich_local,
-				dataframes,
-				settings,
-				supkey == "sales",
-				verbose=verbose
-			)
-
+			df = _enrich_df_geometry(df, s_enrich_local, dataframes, settings, verbose=verbose)
+			df = _enrich_df_basic(df, s_enrich_local, dataframes, settings, supkey == "sales", verbose=verbose)
 			sup.set(supkey, df)
-
 	return sup
 
 
 def identify_parcels_with_holes(df: gpd.GeoDataFrame) -> (gpd.GeoDataFrame, gpd.GeoDataFrame):
 	"""
-	Identify parcels with holes (interior rings)
+  Identify parcels with holes (interior rings) in their geometries.
 
-	Parameters:
-			df (GeoDataFrame): GeoDataFrame with parcel geometries.
-
-	Returns:
-			GeoDataFrame with parcels containing interior rings (holes).
-	"""
-
+  :param df: GeoDataFrame with parcel geometries.
+  :type df: geopandas.GeoDataFrame
+  :returns: GeoDataFrame with parcels containing interior rings.
+  :rtype: geopandas.GeoDataFrame
+  """
 	# Identify parcels with holes
 	def has_holes(geom):
 		if geom.is_valid:
@@ -357,19 +540,25 @@ def identify_parcels_with_holes(df: gpd.GeoDataFrame) -> (gpd.GeoDataFrame, gpd.
 				return any(len(p.interiors) > 0 for p in geom.geoms)
 		return False
 
-	# Identify:
 	parcels_with_holes = df[df.geometry.apply(has_holes)]
-
 	# Remove duplicates:
 	parcels_with_holes = parcels_with_holes.drop_duplicates(subset="key")
-
 	return parcels_with_holes
 
 
-# Private
-
+# Private functions below:
 
 def _enrich_sale_age_days(df: pd.DataFrame, settings: dict) -> pd.DataFrame:
+	"""
+  Enrich the DataFrame with a 'sale_age_days' column indicating the age in days since sale.
+
+  :param df: Input DataFrame with a "sale_date" column.
+  :type df: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: DataFrame with an added "sale_age_days" column.
+  :rtype: pandas.DataFrame
+  """
 	val_date = get_valuation_date(settings)
 	# create a new field with dtype Int64
 	df["sale_age_days"] = None
@@ -380,6 +569,18 @@ def _enrich_sale_age_days(df: pd.DataFrame, settings: dict) -> pd.DataFrame:
 
 
 def _enrich_year_built(df: pd.DataFrame, settings: dict, is_sales: bool = False):
+	"""
+  Enrich the DataFrame with building age information based on year built.
+
+  :param df: Input DataFrame.
+  :type df: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param is_sales: Flag indicating if the DataFrame is sales data.
+  :type is_sales: bool, optional
+  :returns: DataFrame with new age fields.
+  :rtype: pandas.DataFrame
+  """
 	val_date = get_valuation_date(settings)
 	for prefix in ["bldg", "bldg_effective"]:
 		col = f"{prefix}_year_built"
@@ -389,66 +590,73 @@ def _enrich_year_built(df: pd.DataFrame, settings: dict, is_sales: bool = False)
 	return df
 
 
-def _do_enrich_year_built(
-		df: pd.DataFrame,
-		col: str,
-		new_col: str,
-		val_date: datetime,
-		is_sales: bool = False
-) -> pd.DataFrame:
+def _do_enrich_year_built(df: pd.DataFrame, col: str, new_col: str, val_date: datetime, is_sales: bool = False) -> pd.DataFrame:
+	"""
+  Calculate building age and add it as a new column.
 
+  :param df: Input DataFrame.
+  :type df: pandas.DataFrame
+  :param col: Column name for year built.
+  :type col: str
+  :param new_col: New column name for calculated age.
+  :type new_col: str
+  :param val_date: Valuation date.
+  :type val_date: datetime
+  :param is_sales: Flag indicating if processing sales data.
+  :type is_sales: bool, optional
+  :returns: DataFrame with the new age column.
+  :rtype: pandas.DataFrame
+  """
 	if not is_sales:
 		val_year = val_date.year
 		df[new_col] = val_year - df[col]
 	else:
 		df.loc[df["sale_year"].notna(), new_col] = df["sale_year"] - df[col]
-
 	return df
 
 
-def _enrich_time_field(
-		df: pd.DataFrame,
-		prefix: str,
-		add_year_month: bool = True,
-		add_year_quarter: bool = True
-) -> pd.DataFrame:
+def _enrich_time_field(df: pd.DataFrame, prefix: str, add_year_month: bool = True, add_year_quarter: bool = True) -> pd.DataFrame:
+	"""
+  Enrich a DataFrame with time-related fields based on a prefix.
 
+  :param df: Input DataFrame.
+  :type df: pandas.DataFrame
+  :param prefix: Prefix for time fields (e.g., "sale").
+  :type prefix: str
+  :param add_year_month: Whether to add a "year_month" field.
+  :type add_year_month: bool, optional
+  :param add_year_quarter: Whether to add a "year_quarter" field.
+  :type add_year_quarter: bool, optional
+  :returns: DataFrame with enriched time fields.
+  :rtype: pandas.DataFrame
+  :raises ValueError: If required date information is missing.
+  """
 	if f"{prefix}_date" not in df:
 		# Check if we have _year, _month, and _day:
 		if f"{prefix}_year" in df and f"{prefix}_month" in df and f"{prefix}_day" in df:
 			date_str_series = (
-					df[f"{prefix}_year"].astype(str).str.pad(4,fillchar="0") + "-" +
-					df[f"{prefix}_month"].astype(str).str.pad(2,fillchar="0") + "-" +
-					df[f"{prefix}_day"].astype(str).str.pad(2,fillchar="0")
+					df[f"{prefix}_year"].astype(str).str.pad(4, fillchar="0") + "-" +
+					df[f"{prefix}_month"].astype(str).str.pad(2, fillchar="0") + "-" +
+					df[f"{prefix}_day"].astype(str).str.pad(2, fillchar="0")
 			)
 			df[f"{prefix}_date"] = pd.to_datetime(date_str_series, format="%Y-%m-%d", errors="coerce")
 		else:
 			raise ValueError(f"The dataframe does not contain a '{prefix}_date' column.")
-
-	# ensure f"{prefix}_date" is a datetime object:
 	df[f"{prefix}_date"] = pd.to_datetime(df[f"{prefix}_date"], format="%Y-%m-%d", errors="coerce")
-
-	# create a f"{prefix}_year" column if it does not exist:
 	if f"{prefix}_year" not in df:
 		df[f"{prefix}_year"] = df[f"{prefix}_date"].dt.year
 	if f"{prefix}_month" not in df:
 		df[f"{prefix}_month"] = df[f"{prefix}_date"].dt.month
 	if f"{prefix}_quarter" not in df:
 		df[f"{prefix}_quarter"] = df[f"{prefix}_date"].dt.quarter
-
 	if add_year_month:
 		if f"{prefix}_year_month" not in df:
-			# format sale date in the form of "YYYY-MM"
 			df[f"{prefix}_year_month"] = df[f"{prefix}_date"].dt.to_period("M").astype("str")
-
 	if add_year_quarter:
 		if f"{prefix}_year_quarter" not in df:
-			# format sale date in the form of "YYYY-QX"
 			df[f"{prefix}_year_quarter"] = df[f"{prefix}_date"].dt.to_period("Q").astype("str")
-
 	checks = ["_year", "_month", "_day", "_year_month", "_year_quarter"]
 	for check in checks:
-		# Verify that the derived field a. exists and b. matches the value in the date field:
 		if f"{prefix}{check}" in df:
 			if f"{prefix}_date" in df:
 				if check in ["_year", "_month", "_day"]:
@@ -460,7 +668,6 @@ def _enrich_time_field(
 					elif check == "_day":
 						date_value = df[f"{prefix}_date"].dt.day.astype("Int64")
 					if not df[f"{prefix}{check}"].astype("Int64").equals(date_value):
-						# Count how many fields differ:
 						n_diff = df[f"{prefix}{check}"].astype("Int64").ne(date_value).sum()
 						if n_diff > 0:
 							raise ValueError(f"Derived field '{prefix}{check}' does not match the date field '{prefix}_date' in {n_diff} rows.")
@@ -471,14 +678,20 @@ def _enrich_time_field(
 					elif check == "_year_quarter":
 						date_value = df[f"{prefix}_date"].dt.to_period("Q").astype("str")
 					if not df[f"{prefix}{check}"].equals(date_value):
-						# Count how many fields differ:
 						n_diff = df[f"{prefix}{check}"].ne(date_value).sum()
 						raise ValueError(f"Derived field '{prefix}{check}' does not match the date field '{prefix}_date' in {n_diff} rows.")
-
 	return df
 
 
 def _boolify_series(series: pd.Series):
+	"""
+  Convert a series with potential string representations of booleans into actual booleans.
+
+  :param series: Input series.
+  :type series: pandas.Series
+  :returns: Boolean series.
+  :rtype: pandas.Series
+  """
 	if series.dtype in ["object", "string", "str"]:
 		series = series.astype(str).str.lower().str.strip()
 		series = series.replace(["true", "t", "1"], 1)
@@ -489,23 +702,43 @@ def _boolify_series(series: pd.Series):
 
 
 def _boolify_column_in_df(df: pd.DataFrame, field: str):
+	"""
+  Convert a specified column in a DataFrame to boolean.
+
+  :param df: Input DataFrame.
+  :type df: pandas.DataFrame
+  :param field: Column name to convert.
+  :type field: str
+  :returns: DataFrame with the specified column converted.
+  :rtype: pandas.DataFrame
+  """
 	series = df[field]
 	series = _boolify_series(series)
 	df[field] = series
 	return df
 
 
-def _enrich_df_basic(
-		df_in: pd.DataFrame,
-		s_enrich_this: dict,
-		dataframes: dict[str: pd.DataFrame],
-		settings: dict,
-		is_sales: bool = False,
-		verbose: bool = False
-) -> pd.DataFrame:
+def _enrich_df_basic(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: dict[str, pd.DataFrame], settings: dict, is_sales: bool = False, verbose: bool = False) -> pd.DataFrame:
+	"""
+  Perform basic enrichment on a DataFrame including reference table joins, calculations,
+  year built enrichment, and vacant status enrichment.
 
+  :param df_in: Input DataFrame.
+  :type df_in: pandas.DataFrame
+  :param s_enrich_this: Enrichment instructions.
+  :type s_enrich_this: dict
+  :param dataframes: Dictionary of additional DataFrames.
+  :type dataframes: dict[str, pd.DataFrame]
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param is_sales: If True, indicates sales data.
+  :type is_sales: bool, optional
+  :param verbose: If True, prints progress.
+  :type verbose: bool, optional
+  :returns: Enriched DataFrame.
+  :rtype: pandas.DataFrame
+  """
 	df = df_in.copy()
-
 	s_ref = s_enrich_this.get("ref_tables", [])
 	s_calc = s_enrich_this.get("calc", {})
 
@@ -524,11 +757,19 @@ def _enrich_df_basic(
 	return df
 
 
-def _finesse_columns(
-		df_in: pd.DataFrame | gpd.GeoDataFrame,
-		suffix_left: str,
-		suffix_right: str
-):
+def _finesse_columns(df_in: pd.DataFrame | gpd.GeoDataFrame, suffix_left: str, suffix_right: str):
+	"""
+  Combine columns with matching base names but different suffixes into a single column.
+
+  :param df_in: Input DataFrame or GeoDataFrame.
+  :type df_in: pandas.DataFrame or geopandas.GeoDataFrame
+  :param suffix_left: Suffix of the left-hand columns.
+  :type suffix_left: str
+  :param suffix_right: Suffix of the right-hand columns.
+  :type suffix_right: str
+  :returns: DataFrame with combined columns.
+  :rtype: pandas.DataFrame or geopandas.GeoDataFrame
+  """
 	df = df_in.copy()
 	cols_to_finesse = []
 	for col in df.columns.values:
@@ -545,35 +786,45 @@ def _finesse_columns(
 	return df
 
 
-def _enrich_vacant(
-		df_in: pd.DataFrame
-) -> pd.DataFrame:
+def _enrich_vacant(df_in: pd.DataFrame) -> pd.DataFrame:
+	"""
+  Enrich the DataFrame by determining vacant properties based on finished building area.
+
+  :param df_in: Input DataFrame.
+  :type df_in: pandas.DataFrame
+  :returns: DataFrame with an added 'is_vacant' column.
+  :rtype: pandas.DataFrame
+  """
 	df = df_in.copy()
-
 	df["is_vacant"] = False
-
 	df.loc[pd.isna(df["bldg_area_finished_sqft"]), "bldg_area_finished_sqft"] = 0
 	df.loc[df["bldg_area_finished_sqft"].eq(0), "is_vacant"] = True
-
-	# TODO: handle special case of sales, where "vacant_sale" and "is_vacant" don't line up. These should always be consistent.
-
+	# TODO: handle special case of sales, where "vacant_sale" and "is_vacant" don't line up.
 	return df
 
 
-def _enrich_df_geometry(
-		df_in: pd.DataFrame,
-		s_enrich_this: dict,
-		dataframes: dict[str: pd.DataFrame],
-		settings: dict,
-		verbose: bool = False
-) -> gpd.GeoDataFrame:
+def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: dict[str, pd.DataFrame], settings: dict, verbose: bool = False) -> gpd.GeoDataFrame:
+	"""
+  Enrich a DataFrame with spatial information using spatial joins and distance calculations.
 
+  :param df_in: Input DataFrame.
+  :type df_in: pandas.DataFrame
+  :param s_enrich_this: Enrichment instructions for geometry.
+  :type s_enrich_this: dict
+  :param dataframes: Dictionary of additional DataFrames.
+  :type dataframes: dict[str, pd.DataFrame]
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints progress.
+  :type verbose: bool, optional
+  :returns: A GeoDataFrame enriched with spatial information.
+  :rtype: geopandas.GeoDataFrame
+  """
 	df = df_in.copy()
-
 	s_geom = s_enrich_this.get("geometry", [])
 	s_dist = s_enrich_this.get("distances", {})
 
-	gdf : gpd.GeoDataFrame
+	gdf: gpd.GeoDataFrame
 
 	# geometry
 	gdf = _perform_spatial_joins(s_geom, dataframes, verbose=verbose)
@@ -589,113 +840,111 @@ def _enrich_df_geometry(
 		if key in gdf and key in df:
 			if verbose:
 				print(f"Using \"{key}\" to merge shapefiles onto df")
-
 			n_dupes_gdf = gdf.duplicated(subset=key).sum()
 			n_dupes_df = df.duplicated(subset=key).sum()
 			if n_dupes_gdf > 0 or n_dupes_df > 0:
 				raise ValueError(f"Found {n_dupes_gdf} duplicate keys in the geo_parcels dataframe, and {n_dupes_df} duplicate keys in the base dataframe. Cannot perform spatial join. De-duplicate your dataframes and try again.")
-
 			gdf_merged = gdf.merge(df, on=key, how="left", suffixes=("_spatial", "_data"))
 			gdf_merged = _finesse_columns(gdf_merged, "_spatial", "_data")
-
 			success = True
 			break
 	if not success:
 		raise ValueError(f"Could not find a common key between geo_parcels and base dataframe. Tried keys: {try_keys}")
-
-	# basic geometric enrichment
 	gdf_merged = _basic_geo_enrichment(gdf_merged, settings, verbose=verbose)
-
 	return gdf_merged
 
 
 def _basic_geo_enrichment(gdf: gpd.GeoDataFrame, settings: dict, verbose: bool = False) -> gpd.GeoDataFrame:
+	"""
+  Perform basic geometric enrichment on a GeoDataFrame by adding spatial features.
 
+  Adds latitude, longitude, GIS area, and calculates differences between given and GIS areas.
+  Also counts vertices per parcel and computes additional geometric properties.
+
+  :param gdf: Input GeoDataFrame.
+  :type gdf: geopandas.GeoDataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints progress messages.
+  :type verbose: bool, optional
+  :returns: Enriched GeoDataFrame.
+  :rtype: geopandas.GeoDataFrame
+  """
 	if verbose:
 		print(f"Performing basic geometric enrichment...")
-
 	if verbose:
 		print(f"--> adding latitude/longitude...")
-	# Temporarily convert gdf to lat/long coordinates:
 	gdf_latlon = gdf.to_crs(get_crs(gdf, "latlon"))
 	gdf_area = gdf.to_crs(get_crs(gdf, "equal_area"))
-
-	# Get the lat/long coordinates of the centroid of each parcel:
 	gdf["latitude"] = gdf_latlon.geometry.centroid.y
 	gdf["longitude"] = gdf_latlon.geometry.centroid.x
-
 	if verbose:
 		print(f"--> calculate GIS area of each parcel...")
-	# Calculate the GIS area of each parcel:
 	gdf["land_area_gis_sqft"] = gdf_area.geometry.area
-
-	# Fill missing land area with GIS area:
 	gdf["land_area_given_sqft"] = gdf["land_area_sqft"]
 	gdf["land_area_sqft"] = gdf["land_area_sqft"].combine_first(gdf["land_area_gis_sqft"])
-
 	gdf["land_area_gis_delta_sqft"] = gdf["land_area_gis_sqft"] - gdf["land_area_sqft"]
 	gdf["land_area_gis_delta_percent"] = div_field_z_safe(gdf["land_area_gis_delta_sqft"], gdf["land_area_sqft"])
-
 	if verbose:
 		print(f"--> counting vertices per parcel...")
-	# Calculate the vertices of each parcel:
 	gdf["geom_vertices"] = gdf.geometry.apply(get_exterior_coords)
-
 	gdf = _calc_geom_stuff(gdf, verbose)
-
 	return gdf
 
 
 def _calc_geom_stuff(gdf: gpd.GeoDataFrame, verbose: bool = False) -> gpd.GeoDataFrame:
-	"""Compute aspect ratios of geometries in a GeoDataFrame."""
+	"""
+  Compute additional geometric properties for a GeoDataFrame, such as rectangularity and aspect ratio.
+
+  :param gdf: Input GeoDataFrame.
+  :type gdf: geopandas.GeoDataFrame
+  :param verbose: If True, prints progress information.
+  :type verbose: bool, optional
+  :returns: GeoDataFrame with added properties.
+  :rtype: geopandas.GeoDataFrame
+  """
 
 	if verbose:
 		print(f"--> calculating parcel rectangularity...")
-	# Compute the minimum rotated rectangles for each geometry
 	min_rotated_rects = gdf.geometry.apply(lambda geom: geom.minimum_rotated_rectangle)
-
 	min_rotated_rects_area_delta = np.abs(min_rotated_rects.area - gdf.geometry.area)
 	min_rotated_rects_area_delta_percent = div_field_z_safe(min_rotated_rects_area_delta, gdf.geometry.area)
-
 	gdf["geom_rectangularity_num"] = 1.0 - min_rotated_rects_area_delta_percent
-
-	# Extract coordinates for each rectangle
 	coords = min_rotated_rects.apply(lambda rect: np.array(rect.exterior.coords[:-1]))  # Drop duplicate last point
-
 	if verbose:
 		print(f"--> calculating parcel aspect ratios...")
-
-	# Compute edge lengths efficiently using NumPy
 	edge_lengths = coords.apply(lambda pts: np.sqrt(np.sum(np.diff(pts, axis=0) ** 2, axis=1)))
-
-	# Extract width and height (smallest two edges)
 	dimensions = edge_lengths.apply(lambda lengths: np.sort(lengths)[:2])
-
-	# Compute aspect ratio (width / height)
 	aspect_ratios = dimensions.apply(lambda dims: dims[1] / dims[0] if dims[0] != 0 else float('inf'))
-
 	gdf["geom_aspect_ratio"] = aspect_ratios
-
 	gdf = identify_irregular_parcels(gdf, verbose)
-
 	return gdf
 
 
-def _perform_spatial_joins(s_geom: list, dataframes: dict[str: pd.DataFrame], verbose: bool = False) -> gpd.GeoDataFrame:
+def _perform_spatial_joins(s_geom: list, dataframes: dict[str, pd.DataFrame], verbose: bool = False) -> gpd.GeoDataFrame:
+	"""
+  Perform spatial joins based on a list of spatial join instructions.
 
-	#  For geometry, provide a list of strings and/or objects, these represent spatial joins.
-	#  Strings are interpreted as the IDs of loaded shapefiles. Objects must have these keys: 'id', and 'predicate',
-	#  where 'predicate' is the name of the spatial join function to use.
+  Strings in s_geom are interpreted as IDs of loaded shapefiles; dicts must contain an 'id'
+  and optionally a 'predicate' (default "contains_centroid").
 
+  :param s_geom: List of spatial join instructions.
+  :type s_geom: list
+  :param dataframes: Dictionary of DataFrames containing spatial data.
+  :type dataframes: dict[str, pd.DataFrame]
+  :param verbose: If True, prints progress messages.
+  :type verbose: bool, optional
+  :returns: GeoDataFrame after performing spatial joins.
+  :rtype: geopandas.GeoDataFrame
+  :raises ValueError: If required spatial data is missing.
+  """
 	if not isinstance(s_geom, list):
 		s_geom = [s_geom]
 
-	# First, get our parcel geometry, look for a dataframe called "geo_parcels":
 	if "geo_parcels" not in dataframes:
 		raise ValueError("No 'geo_parcels' dataframe found in the dataframes. This layer is required, and it must contain parcel geometry.")
 
-	gdf_parcels : gpd.GeoDataFrame = dataframes["geo_parcels"]
-
+	gdf_parcels: gpd.GeoDataFrame = dataframes["geo_parcels"]
 	gdf_merged = gdf_parcels.copy()
 
 	if verbose:
@@ -703,28 +952,21 @@ def _perform_spatial_joins(s_geom: list, dataframes: dict[str: pd.DataFrame], ve
 
 	for geom in s_geom:
 		if isinstance(geom, str):
-			entry = {
-				"id": str(geom),
-				"predicate": "contains_centroid"
-			}
+			entry = {"id": str(geom), "predicate": "contains_centroid"}
 		elif isinstance(geom, dict):
 			entry = geom
 		else:
 			raise ValueError(f"Invalid geometry entry: {geom}")
 		_id = entry.get("id")
 		predicate = entry.get("predicate", "contains_centroid")
-
 		if _id is None:
 			raise ValueError("No 'id' found in geometry entry.")
-
 		if verbose:
 			if predicate != "contains_centroid":
 				print(f"--> {_id} @ {predicate}")
 			else:
 				print(f"--> {_id}")
-
 		gdf = dataframes[_id]
-
 		fields_to_tag = entry.get("fields", None)
 		if fields_to_tag is None:
 			fields_to_tag = [field for field in gdf.columns if field != "geometry"]
@@ -732,126 +974,140 @@ def _perform_spatial_joins(s_geom: list, dataframes: dict[str: pd.DataFrame], ve
 			for field in fields_to_tag:
 				if field not in gdf:
 					raise ValueError(f"Field to tag '{field}' not found in geometry dataframe '{_id}'.")
-
 		gdf_merged = _perform_spatial_join(gdf_merged, gdf, predicate, fields_to_tag)
 
-	# identify parcels with no geometry
 	gdf_no_geometry = gdf_merged[gdf_merged["geometry"].isna()]
-
 	if len(gdf_no_geometry) > 0:
 		warnings.warn(f"Found {len(gdf_no_geometry)} parcels with no geometry. These parcels will be excluded from the analysis. You can find them in out/errors/")
 		os.makedirs("out/errors", exist_ok=True)
 		gdf_no_geometry.to_parquet("out/errors/parcels_no_geometry.parquet")
 		gdf_no_geometry.to_csv("out/errors/parcels_no_geometry.csv", index=False)
 		gdf_no_geom_keys = gdf_no_geometry["key"].values
-		# write out the keys:
 		with open("out/errors/parcels_no_geometry_keys.txt", "w") as f:
 			for key in gdf_no_geom_keys:
 				f.write(f"{key}\n")
-		# exclude no-geometry rows from gdf_merged:
 		gdf_merged = gdf_merged.dropna(subset=["geometry"])
-
 	return gdf_merged
 
 
 def _perform_spatial_join_contains_centroid(gdf: gpd.GeoDataFrame, gdf_overlay: gpd.GeoDataFrame):
+	"""
+  Perform a spatial join where the centroid of geometries in gdf is within gdf_overlay.
+
+  :param gdf: Base GeoDataFrame.
+  :type gdf: geopandas.GeoDataFrame
+  :param gdf_overlay: Overlay GeoDataFrame.
+  :type gdf_overlay: geopandas.GeoDataFrame
+  :returns: GeoDataFrame after spatial join.
+  :rtype: geopandas.GeoDataFrame
+  """
 	# Compute centroids of each parcel
 	gdf["geometry_centroid"] = gdf.geometry.centroid
 
-	# Use within first
+	# Use within predicate for spatial join
 	gdf = gpd.sjoin(
 		gdf.set_geometry("geometry_centroid"),
 		gdf_overlay,
 		how="left",
 		predicate="within"
 	)
-
 	# remove extra columns like "index_right":
 	gdf = gdf.drop(columns=["index_right"], errors="ignore")
-
 	return gdf
 
 
 def _perform_spatial_join(gdf_in: gpd.GeoDataFrame, gdf_overlay: gpd.GeoDataFrame, predicate: str, fields_to_tag: list[str]):
+	"""
+  Perform a spatial join between two GeoDataFrames using the specified predicate.
+
+  :param gdf_in: Base GeoDataFrame.
+  :type gdf_in: geopandas.GeoDataFrame
+  :param gdf_overlay: Overlay GeoDataFrame.
+  :type gdf_overlay: geopandas.GeoDataFrame
+  :param predicate: Spatial predicate to use (e.g., "contains_centroid").
+  :type predicate: str
+  :param fields_to_tag: List of fields to merge from the overlay.
+  :type fields_to_tag: list[str]
+  :returns: GeoDataFrame after performing the spatial join.
+  :rtype: geopandas.GeoDataFrame
+  :raises ValueError: If an invalid predicate is provided.
+  """
 	gdf = gdf_in.copy()
-
-	# Ensure both GeoDataFrames have the same CRS
 	gdf_overlay = gdf_overlay.to_crs(gdf.crs)
-
 	if "__overlay_id__" in gdf_overlay:
 		raise ValueError("The overlay GeoDataFrame already contains a '__overlay_id__' column. This column is used internally by the spatial join function, and must not be present in the overlay GeoDataFrame.")
-
-	# assign each overlay polygon a unique ID:
 	gdf_overlay["__overlay_id__"] = range(len(gdf_overlay))
-
 	# TODO: add more predicates as needed
 	if predicate == "contains_centroid":
 		gdf = _perform_spatial_join_contains_centroid(gdf, gdf_overlay)
 	else:
 		raise ValueError(f"Invalid spatial join predicate: {predicate}")
-
-	# gdf is now properly tagged with "__overlay_id__"
-
-	# Merge in the fields we want:
 	gdf = gdf.drop(columns=fields_to_tag, errors="ignore")
 	gdf = gdf.merge(gdf_overlay[["__overlay_id__"] + fields_to_tag], on="__overlay_id__", how="left")
-
-	# clean up:
 	gdf.set_geometry("geometry", inplace=True)
 	gdf = gdf.drop(columns=["geometry_centroid", "__overlay_id__"], errors="ignore")
 	return gdf
 
 
 def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDataFrame, _id: str, unit: str = "km") -> pd.DataFrame:
+	"""
+  Perform a divide-by-zero-safe nearest neighbor spatial join to calculate distances.
 
+  :param df_in: Base GeoDataFrame.
+  :type df_in: geopandas.GeoDataFrame
+  :param gdf_in: Overlay GeoDataFrame.
+  :type gdf_in: geopandas.GeoDataFrame
+  :param _id: Identifier used for naming the distance column.
+  :type _id: str
+  :param unit: Unit for distance conversion (default "km").
+  :type unit: str, optional
+  :returns: DataFrame with an added distance column.
+  :rtype: pandas.DataFrame
+  :raises ValueError: If an unsupported unit is specified.
+  """
 	unit_factors = {"m": 1, "km": 0.001, "mile": 0.000621371, "ft": 3.28084}
 	if unit not in unit_factors:
 		raise ValueError(f"Unsupported unit '{unit}'")
-
-	# Convert to equal-distance CRS for accurate distance calculations
 	crs = get_crs(df_in, "equal_distance")
 	df_projected = df_in.to_crs(crs).copy()
 	gdf_projected = gdf_in.to_crs(crs).copy()
-
-	# Perform nearest neighbor spatial join but keep only the key and distance column
 	nearest = gpd.sjoin_nearest(df_projected, gdf_projected, how="left", distance_col=f"dist_to_{_id}")[["key", f"dist_to_{_id}"]]
-
-	# Convert distance to the desired unit
 	nearest[f"dist_to_{_id}"] *= unit_factors[unit]
-
-	# count duplicated rows:
 	n_duplicates_nearest = nearest.duplicated(subset="key").sum()
 	n_duplicates_df = df_in.duplicated(subset="key").sum()
-
 	if n_duplicates_df > 0:
 		raise ValueError(f"Found {n_duplicates_nearest} duplicate keys in the base dataframe, cannot perform distance calculations. Please de-duplicate your dataframes and try again.")
-
 	if n_duplicates_nearest > 0:
-		# de-duplicate nearest:
 		nearest = nearest.sort_values(by=["key", f"dist_to_{_id}"], ascending=[True, True])
 		nearest = nearest.drop_duplicates(subset="key")
-
-	# Merge results back into the original df_in (which is still in its original CRS)
 	df_out = df_in.merge(nearest, on="key", how="left")
-
 	return df_out
 
 
-def _perform_distance_calculations(df_in: gpd.GeoDataFrame, s_dist: dict, dataframes: dict[str: pd.DataFrame], unit: str = "km", verbose: bool = False) -> gpd.GeoDataFrame:
-	# For distances, provide a list of strings and/or objects. Strings are interpreted as the IDs of loaded shapefiles.
-	# Objects must have an 'id' key, and optionally a 'field' key. If a 'field' key is provided, distances will be
-	# calculated for each row in the shapefile corresponding to a unique value for that field.
+def _perform_distance_calculations(df_in: gpd.GeoDataFrame, s_dist: dict, dataframes: dict[str, pd.DataFrame], unit: str = "km", verbose: bool = False) -> gpd.GeoDataFrame:
+	"""
+  Perform distance calculations based on enrichment instructions.
 
+  :param df_in: Base GeoDataFrame.
+  :type df_in: geopandas.GeoDataFrame
+  :param s_dist: Distance calculation instructions.
+  :type s_dist: dict
+  :param dataframes: Dictionary of additional DataFrames.
+  :type dataframes: dict[str, pd.DataFrame]
+  :param unit: Unit for distance conversion (default "km").
+  :type unit: str, optional
+  :param verbose: If True, prints progress information.
+  :type verbose: bool, optional
+  :returns: GeoDataFrame with calculated distance fields.
+  :rtype: geopandas.GeoDataFrame
+  :raises ValueError: If a distance entry is invalid.
+  """
 	df = df_in.copy()
-
 	if verbose:
 		print(f"Performing distance calculations...")
-
 	for entry in s_dist:
 		if isinstance(entry, str):
-			entry = {
-				"id": str(entry)
-			}
+			entry = {"id": str(entry)}
 		elif not isinstance(entry, dict):
 			raise ValueError(f"Invalid distance entry: {entry}")
 		_id = entry.get("id")
@@ -872,11 +1128,25 @@ def _perform_distance_calculations(df_in: gpd.GeoDataFrame, s_dist: dict, datafr
 					continue
 				gdf_subset = gdf[gdf[field].eq(unique)]
 				df = _do_perform_distance_calculations(df, gdf_subset, f"{_id}_{unique}", unit)
-
 	return df
 
 
-def _perform_ref_tables(df_in: pd.DataFrame | gpd.GeoDataFrame, s_ref: list | dict, dataframes: dict[str: pd.DataFrame], verbose: bool = False) -> pd.DataFrame | gpd.GeoDataFrame:
+def _perform_ref_tables(df_in: pd.DataFrame | gpd.GeoDataFrame, s_ref: list | dict, dataframes: dict[str, pd.DataFrame], verbose: bool = False) -> pd.DataFrame | gpd.GeoDataFrame:
+	"""
+  Perform reference table joins to enrich the input DataFrame.
+
+  :param df_in: Input DataFrame or GeoDataFrame.
+  :type df_in: pandas.DataFrame or geopandas.GeoDataFrame
+  :param s_ref: Reference table instructions (list or dict).
+  :type s_ref: list or dict
+  :param dataframes: Dictionary of reference DataFrames.
+  :type dataframes: dict[str, pd.DataFrame]
+  :param verbose: If True, prints progress information.
+  :type verbose: bool, optional
+  :returns: Enriched DataFrame after reference table joins.
+  :rtype: pandas.DataFrame or geopandas.GeoDataFrame
+  :raises ValueError: If required keys or fields are missing.
+  """
 	df = df_in.copy()
 	if not isinstance(s_ref, list):
 		s_ref = [s_ref]
@@ -903,37 +1173,38 @@ def _perform_ref_tables(df_in: pd.DataFrame | gpd.GeoDataFrame, s_ref: list | di
 			raise ValueError("The 'add_fields' field must be a list of strings.")
 		if len(add_fields) == 0:
 			raise ValueError("The 'add_fields' field must contain at least one string.")
-
 		if _id not in dataframes:
 			raise ValueError(f"Ref table '{_id}' not found in dataframes.")
-
 		df_ref = dataframes[_id]
 		if key_ref_table not in df_ref:
 			raise ValueError(f"Key field '{key_ref_table}' not found in ref table '{_id}'.")
-
 		if key_target not in df:
 			print(f"Target field '{key_target}' not found in base dataframe")
 			print(f"base df columns = {df.columns.values}")
 			raise ValueError(f"Target field '{key_target}' not found in base dataframe")
-
 		for field in add_fields:
 			if field not in df_ref:
 				raise ValueError(f"Field '{field}' not found in ref table '{_id}'.")
 			if field in df_in:
 				raise ValueError(f"Field '{field}' already exists in base dataframe.")
-
 		df_ref = df_ref[[key_ref_table] + add_fields]
-
 		if key_ref_table == key_target:
 			df = df.merge(df_ref, on=key_target, how="left")
 		else:
 			df = df.merge(df_ref, left_on=key_target, right_on=key_ref_table, how="left")
 			df = df.drop(columns=[key_ref_table])
-
 	return df
 
 
 def _get_calc_cols(settings: dict) -> list[str]:
+	"""
+  Retrieve a list of calculated columns based on settings.
+
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: List of column names used in calculations.
+  :rtype: list[str]
+  """
 	s_load = settings.get("data", {}).get("load", {})
 	cols_to_load = []
 	for key in s_load:
@@ -945,12 +1216,39 @@ def _get_calc_cols(settings: dict) -> list[str]:
 
 
 def _do_get_calc_cols(df_entry: dict) -> list[str]:
+	"""
+  Extract column names referenced in a calculation dictionary.
+
+  :param df_entry: DataFrame entry from settings.
+  :type df_entry: dict
+  :returns: List of column names referenced in calculations.
+  :rtype: list[str]
+  """
 	e_calc = df_entry.get("calc", {})
 	fields_in_calc = _crawl_calc_dict_for_fields(e_calc)
 	return fields_in_calc
 
 
 def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_cat: list = None, fields_bool: list = None, fields_num: list = None) -> pd.DataFrame | None:
+	"""
+  Load a DataFrame from a file based on instructions and perform calculations and type adjustments.
+
+  :param entry: Dictionary with file loading instructions.
+  :type entry: dict
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints progress information.
+  :type verbose: bool, optional
+  :param fields_cat: List of categorical fields.
+  :type fields_cat: list, optional
+  :param fields_bool: List of boolean fields.
+  :type fields_bool: list, optional
+  :param fields_num: List of numeric fields.
+  :type fields_num: list, optional
+  :returns: Loaded and processed DataFrame, or None if filename is empty.
+  :rtype: pandas.DataFrame or None
+  :raises ValueError: If an unsupported file extension is encountered.
+  """
 	filename = entry.get("filename", "")
 	filename = f"in/{filename}"
 	if filename == "":
@@ -988,21 +1286,15 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
 			cols_to_load += [original]
 			rename_map[original] = rename_key
 
-	# Get a list of every field that is either renamed or used in a calculation:
 	fields_in_calc = _crawl_calc_dict_for_fields(entry.get("calc", {}))
-
 	cols_to_load += fields_in_calc
-
-	# These are the columns we will actually load:
 	cols_to_load = list(set(cols_to_load))
 
 	is_geometry = False
-	# Always load "geometry" column if it exists:
 	if "geometry" in column_names and "geometry" not in cols_to_load:
 		cols_to_load.append("geometry")
 		is_geometry = True
 
-	# Read the actual file:
 	if ext == "parquet":
 		if dtype_map:
 			warnings.warn("dtypes are ignored when loading parquet files.")
@@ -1015,13 +1307,9 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
 	else:
 		raise ValueError(f"Unsupported file extension: {ext}")
 
-	# Perform calculations:
 	df = perform_calculations(df, e_calc)
-
-	# Perform renames:
 	df = df.rename(columns=rename_map)
 
-	# Fix up the types appropriately
 	if fields_cat is None:
 		fields_cat = get_fields_categorical(settings, include_boolean=False)
 	if fields_bool is None:
@@ -1037,23 +1325,16 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
 		elif col in fields_num:
 			df[col] = df[col].astype("Float64")
 
-	# Fix up all the dates
 	date_fields = get_fields_date(settings, df)
 	time_format_map = {}
 	for xkey in extra_map:
 		if xkey in date_fields:
-			# The third parameter specifies a date, if it's a date field
 			time_format_map[xkey] = extra_map[xkey]
-
-	# Ensure that all date fields have a time format specified:
 	for dkey in date_fields:
 		if dkey not in time_format_map:
 			raise ValueError(f"Date field '{dkey}' does not have a time format specified.")
-
-	# Enrich the time fields (e.g. add year, month, quarter, etc., and ensure all sub-fields match the date field)
 	df = enrich_time(df, time_format_map, settings)
 
-	# Handle duplicated rows
 	dupes = entry.get("dupes", None)
 	dupes_was_none = dupes is None
 	if dupes is None:
@@ -1061,36 +1342,24 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
 			dupes = "auto"
 		else:
 			dupes = {}
-
 	if dupes == "auto":
 		if is_geometry:
-			# For geometry columns, default to the first column, whatever it is
 			cols = [col for col in df.columns.values if col != "geometry"]
 			col = cols[0]
-			dupes = {
-				"subset": [col],
-				"sort_by": [col, "asc"],
-				"drop": True
-			}
+			dupes = {"subset": [col], "sort_by": [col, "asc"], "drop": True}
 			if dupes_was_none:
 				warnings.warn(f"'dupes' not found for geo df '{filename}', defaulting to \"{col}\" as de-dedupe key. Set 'dupes:\"auto\" to remove this warning.'")
 		else:
-			# For non-geometry columns, try to find the primary, secondary, or tertiary key
 			keys = ["key", "key2", "key3"]
 			for key in keys:
 				if key in df:
-					dupes = {
-						"subset": [key],
-						"sort_by": [key, "asc"],
-						"drop": True
-					}
+					dupes = {"subset": [key], "sort_by": [key, "asc"], "drop": True}
 					break
 
 	df = _handle_duplicated_rows(df, dupes)
 
-	# Check if it's a geodataframe and if so clean it:
 	if is_geometry:
-		gdf : gpd.GeoDataFrame = gpd.GeoDataFrame(df, geometry="geometry")
+		gdf: gpd.GeoDataFrame = gpd.GeoDataFrame(df, geometry="geometry")
 		gdf = clean_geometry(gdf, ensure_polygon=True)
 		df = gdf
 
@@ -1098,6 +1367,15 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
 
 
 def _snoop_column_names(filename: str) -> list[str]:
+	"""
+  Retrieve column names from a file without loading full data.
+
+  :param filename: Path to the file.
+  :type filename: str
+  :returns: List of column names.
+  :rtype: list[str]
+  :raises ValueError: If file extension is unsupported.
+  """
 	ext = str(filename).split(".")[-1]
 	if ext == "parquet":
 		parquet_file = pq.ParquetFile(filename)
@@ -1108,22 +1386,24 @@ def _snoop_column_names(filename: str) -> list[str]:
 
 
 def _handle_duplicated_rows(df_in: pd.DataFrame, dupes: dict) -> pd.DataFrame:
+	"""
+  Handle duplicated rows in a DataFrame based on specified rules.
 
+  :param df_in: Input DataFrame.
+  :type df_in: pandas.DataFrame
+  :param dupes: Dictionary specifying duplicate handling instructions.
+  :type dupes: dict
+  :returns: DataFrame with duplicates handled.
+  :rtype: pandas.DataFrame
+  """
 	subset = dupes.get("subset", "key")
-
 	if not isinstance(subset, list):
 		subset = [subset]
-
-	# if any of the specified keys are not in the dataframe, return the dataframe as is
 	for key in subset:
 		if key not in df_in:
 			return df_in
-
 	do_drop = dupes.get("drop", True)
-
-	# Count duplicates:
 	num_dupes = df_in.duplicated(subset=subset).sum()
-
 	if num_dupes > 0:
 		sort_by = dupes.get("sort_by", ["key", "asc"])
 		if not isinstance(sort_by, list):
@@ -1134,27 +1414,36 @@ def _handle_duplicated_rows(df_in: pd.DataFrame, dupes: dict) -> pd.DataFrame:
 		else:
 			for entry in sort_by:
 				if not isinstance(entry, list):
-					raise ValueError(f"sort_by must be a list of string pairs of the form [<field_name>, <asc|desc>], but found a non-list entry: {entry}")
+					raise ValueError(f"sort_by must be a list of string pairs, but found a non-list entry: {entry}")
 				elif len(entry) != 2:
-					raise ValueError(f"sort_by must be a list of string pairs of the form [<field_name>, <asc|desc], but found an entry with {len(entry)} members: {entry}")
+					raise ValueError(f"sort_by entry has {len(entry)} members: {entry}")
 				elif not isinstance(entry[0], str) or not isinstance(entry[1], str):
-					raise ValueError(f"sort_by must be a list of string pairs of the form [<field_name>, <asc|desc], but found an entry with non-string members: {entry}")
-
+					raise ValueError(f"sort_by entry has non-string members: {entry}")
 		df = df_in.copy()
 		bys = [x[0] for x in sort_by]
 		ascendings = [x[1] == "asc" for x in sort_by]
 		df = df.sort_values(by=bys, ascending=ascendings)
 		if do_drop:
 			df = df.drop_duplicates(subset=subset, keep="first")
-
 		return df.reset_index(drop=True)
-
 	return df_in
 
 
-def _merge_dict_of_dfs(dataframes: dict[str: pd.DataFrame], merge_list: list, settings: dict) -> pd.DataFrame:
-	merges = []
+def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, settings: dict) -> pd.DataFrame:
+	"""
+  Merge multiple DataFrames according to merge instructions.
 
+  :param dataframes: Dictionary mapping keys to DataFrames.
+  :type dataframes: dict[str, pd.DataFrame]
+  :param merge_list: List of merge instructions.
+  :type merge_list: list
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: Merged DataFrame.
+  :rtype: pandas.DataFrame
+  :raises ValueError: If required keys are missing.
+  """
+	merges = []
 	s_reconcile = settings.get("data", {}).get("process", {}).get("reconcile", {})
 
 	for entry in merge_list:
@@ -1181,18 +1470,12 @@ def _merge_dict_of_dfs(dataframes: dict[str: pd.DataFrame], merge_list: list, se
 		})
 
 	df_merged: pd.DataFrame | None = None
-
-	# Get a list of all columns that appear in any of the dataframes
 	all_cols = []
-
-	# Get a list of all columns that appear in more than one dataframe, indexed by base name -> list of suffixed names
-	# This is to automatically detect and (later) resolve conflicts
 	conflicts = {}
 	for merge in merges:
 		df = merge["df"]
 		on = merge["on"]
 		suffixes = {}
-
 		for col in df.columns.values:
 			if col == on:
 				continue
@@ -1204,12 +1487,8 @@ def _merge_dict_of_dfs(dataframes: dict[str: pd.DataFrame], merge_list: list, se
 				if col not in conflicts:
 					conflicts[col] = []
 				conflicts[col].append(suffixed)
-
 		df = df.rename(columns=suffixes)
 		merge["df"] = df
-
-
-	# Merge everything together into one big fat dataframe
 	for merge in merges:
 		_id = merge["id"]
 		df = merge.get("df", None)
@@ -1219,70 +1498,50 @@ def _merge_dict_of_dfs(dataframes: dict[str: pd.DataFrame], merge_list: list, se
 			df_merged = df
 		else:
 			df_merged = pd.merge(df_merged, df, how=how, on=on, suffixes=("", f"_{_id}"))
-
-
-	# If we've defined our own reconciliation rules:
 	for base_field in s_reconcile:
-		# Get the list of ids for each field, this specifies the priority order to load them from
 		df_ids = s_reconcile[base_field]
 		if base_field not in all_cols:
 			raise ValueError(f"Reconciliation field '{base_field}' not found in any of the dataframes.")
-		# Generate the child fields
 		child_fields = [f"{base_field}_{df_id}" for df_id in df_ids]
-
-		# If we already have an auto-generated conflict entry for this field, we will merge with it
 		if base_field in conflicts:
-			# Remove any values for ids that the user has specified
 			old_child_fields = conflicts[base_field]
 			old_child_fields = [field for field in old_child_fields if field not in child_fields]
-
-			# Prioritize the user's named ids over the auto-generated ones
 			child_fields = child_fields + old_child_fields
-
-		# Update the entry and pass it on
 		conflicts[base_field] = child_fields
-
-	# Clean up the conflicts
 	for base_field in conflicts:
 		if base_field not in df_merged:
 			warnings.warn(f"Warning: Reconciliation field '{base_field}' not found in merged dataframe.")
 			continue
-		# Get the child fields, representing the desired merge order for the suffixed columns
 		child_fields = conflicts[base_field]
 		if len(child_fields) > 1:
-			# Start with the first child field, then fill in with the next one for whatever is missing, and so on
 			df_merged[base_field] = df_merged[base_field].fillna(df_merged[child_fields[0]])
 			for i in range(1, len(child_fields)):
 				df_merged[base_field] = df_merged[base_field].fillna(df_merged[child_fields[i]])
-			# Drop all child fields
 			df_merged = df_merged.drop(columns=child_fields)
-
 	calc_cols = _get_calc_cols(settings)
-
 	for col in df_merged.columns.values:
 		if col in calc_cols:
 			df_merged = df_merged.drop(columns=[col])
-
 	if "key" not in df_merged:
 		raise ValueError("No 'key' field found in merged dataframe. This field is required.")
-
 	len_old = len(df_merged)
-
-	# Drop any rows that lack primary keys:
 	df_merged = df_merged.dropna(subset=["key"])
-
 	len_new = len(df_merged)
-
 	if len_new < len_old:
 		warnings.warn(f"Dropped {len_old - len_new} rows due to missing primary key.")
-
 	return df_merged
 
 
-def _write_canonical_splits(
-		df_sales_in: pd.DataFrame,
-		settings: dict
-):
+def _write_canonical_splits(df_sales_in: pd.DataFrame, settings: dict):
+	"""
+  Write canonical split keys for sales data to disk.
+
+  :param df_sales_in: Input sales DataFrame.
+  :type df_sales_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: None
+  """
 	df_sales = get_sales(df_sales_in, settings)
 	model_groups = get_model_group_ids(settings, df_sales)
 	instructions = settings.get("modeling", {}).get("instructions", {})
@@ -1292,62 +1551,69 @@ def _write_canonical_splits(
 		_do_write_canonical_split(model_group, df_sales, settings, test_train_frac, random_seed)
 
 
-def _perform_canonical_split(
-		model_group: str,
-		df_sales_in: pd.DataFrame,
-		settings: dict,
-		test_train_fraction: float = 0.8,
-		random_seed: int = 1337
-):
-	# Select only the relevant model group
-	df = df_sales_in[df_sales_in["model_group"].eq(model_group)].copy()
+def _perform_canonical_split(model_group: str, df_sales_in: pd.DataFrame, settings: dict, test_train_fraction: float = 0.8, random_seed: int = 1337):
+	"""
+  Perform a canonical split of the sales DataFrame for a given model group into test and training sets.
 
-	# Divide universe & sales into vacant & improved
+  :param model_group: Model group identifier.
+  :type model_group: str
+  :param df_sales_in: Input sales DataFrame.
+  :type df_sales_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param test_train_fraction: Fraction of data to use for training (default is 0.8).
+  :type test_train_fraction: float, optional
+  :param random_seed: Random seed for reproducibility (default is 1337).
+  :type random_seed: int, optional
+  :returns: Tuple of (test DataFrame, training DataFrame).
+  :rtype: tuple(pandas.DataFrame, pandas.DataFrame)
+  """
+	df = df_sales_in[df_sales_in["model_group"].eq(model_group)].copy()
 	df_v = get_vacant_sales(df, settings)
 	df_i = df.drop(df_v.index)
-
-	# Do the split for vacant & improved property separately
 	np.random.seed(random_seed)
 	df_v_train = df_v.sample(frac=test_train_fraction)
 	df_v_test = df_v.drop(df_v_train.index)
-
 	df_i_train = df_i.sample(frac=test_train_fraction)
 	df_i_test = df_i.drop(df_i_train.index)
-
-	# Then piece them back together
 	df_test = pd.concat([df_v_test, df_i_test]).reset_index(drop=True)
 	df_train = pd.concat([df_v_train, df_i_train]).reset_index(drop=True)
-
-	# Now the vacant test set is always guaranteed to be a perfect subset of the vacant + improved test set
 	return df_test, df_train
 
 
-def _do_write_canonical_split(
-		model_group: str,
-		df_sales_in: pd.DataFrame,
-		settings: dict,
-		test_train_fraction: float = 0.8,
-		random_seed: int = 1337
-):
+def _do_write_canonical_split(model_group: str, df_sales_in: pd.DataFrame, settings: dict, test_train_fraction: float = 0.8, random_seed: int = 1337):
+	"""
+  Write the canonical split keys (train and test) for a given model group to disk.
 
-	df_test, df_train = _perform_canonical_split(
-		model_group,
-		df_sales_in,
-		settings,
-		test_train_fraction,
-		random_seed
-	)
-
+  :param model_group: Model group identifier.
+  :type model_group: str
+  :param df_sales_in: Input sales DataFrame.
+  :type df_sales_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param test_train_fraction: Fraction of data for training (default is 0.8).
+  :type test_train_fraction: float, optional
+  :param random_seed: Random seed for reproducibility (default is 1337).
+  :type random_seed: int, optional
+  :returns: None
+  """
+	df_test, df_train = _perform_canonical_split(model_group, df_sales_in, settings, test_train_fraction, random_seed)
 	outpath = f"out/models/{model_group}/_data"
 	os.makedirs(outpath, exist_ok=True)
-
 	df_train[["key"]].to_csv(f"{outpath}/train_keys.csv", index=False)
 	df_test[["key"]].to_csv(f"{outpath}/test_keys.csv", index=False)
 
 
-def _read_split_keys(
-		model_group: str
-):
+def _read_split_keys(model_group: str):
+	"""
+  Read the train and test split keys for a model group from disk.
+
+  :param model_group: Model group identifier.
+  :type model_group: str
+  :returns: Tuple of (test keys, train keys) as numpy arrays.
+  :rtype: tuple(numpy.ndarray, numpy.ndarray)
+  :raises ValueError: If split key files are not found.
+  """
 	path = f"out/models/{model_group}/_data"
 	train_path = f"{path}/train_keys.csv"
 	test_path = f"{path}/test_keys.csv"
@@ -1358,25 +1624,29 @@ def _read_split_keys(
 	return test_keys, train_keys
 
 
-def _tag_model_groups_sup(
-		sup: SalesUniversePair,
-		settings: dict,
-		verbose: bool = False
-):
+def _tag_model_groups_sup(sup: SalesUniversePair, settings: dict, verbose: bool = False):
+	"""
+  Tag model groups for both sales and universe DataFrames based on settings.
+
+  Hydrates sales data and assigns model groups to parcels and sales by applying filters from settings.
+  Also prints summary statistics if verbose is True.
+
+  :param sup: SalesUniversePair containing sales and universe DataFrames.
+  :type sup: SalesUniversePair
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: If True, prints detailed progress information.
+  :type verbose: bool, optional
+  :returns: Updated SalesUniversePair with model group tags.
+  :rtype: SalesUniversePair
+  """
 	df_sales = sup["sales"].copy()
 	df_univ = sup["universe"].copy()
-
-	# We "hydrate" the sales because we want to resolve modeling group separately;
-	# It may be the case that at time of sale e.g. zoning or building information changed in such a way that would have a
-	# meaningful consequence on the modeling group the parcel belongs to. E.g., a former ag parcel that later got rezoned
-	# as a single-family parcel.
 	df_sales_hydrated = get_hydrated_sales_from_sup(sup)
-
 	mg = settings.get("modeling", {}).get("model_groups", {})
 
 	print(f"Len univ before = {len(df_univ)}")
 	print(f"Len sales before = {len(df_sales)} after = {len(df_sales_hydrated)}")
-
 	print(f"Overall")
 	print(f"--> {len(df_univ):,} parcels")
 	print(f"--> {len(df_sales):,} sales")
@@ -1384,23 +1654,18 @@ def _tag_model_groups_sup(
 	df_univ["model_group"] = None
 	df_sales_hydrated["model_group"] = None
 	for mg_id in mg:
-
 		# only apply model groups to parcels that don't already have one
 		idx_no_model_group = df_univ["model_group"].isnull()
-
 		entry = mg[mg_id]
 		_filter = entry.get("filter", [])
-
 		univ_index = resolve_filter(df_univ, _filter)
 		df_univ.loc[idx_no_model_group & univ_index, "model_group"] = mg_id
-
 		idx_no_model_group = df_sales_hydrated["model_group"].isnull()
 		sales_index = resolve_filter(df_sales_hydrated, _filter)
 		df_sales_hydrated.loc[idx_no_model_group & sales_index, "model_group"] = mg_id
 
 	os.makedirs("out/look", exist_ok=True)
 	df_univ.to_parquet("out/look/tag-univ-0.parquet")
-
 	old_model_group = df_univ[["key", "model_group"]]
 
 	for mg_id in mg:
@@ -1411,34 +1676,27 @@ def _tag_model_groups_sup(
 		if not common_area:
 			continue
 		print(f"Assigning common areas for model group {mg_id}...")
-
 		common_area_filters: list | None = None
 		if isinstance(common_area, list):
 			common_area_filters = common_area
-
 		print(f"common area filters = {common_area_filters}")
-
 		df_univ = _assign_modal_model_group_to_common_area(df_univ, mg_id, common_area_filters)
 
 	df_univ.to_parquet("out/look/tag-univ-1.parquet")
-
 	index_changed = ~old_model_group["model_group"].eq(df_univ["model_group"])
 	rows_changed = df_univ[index_changed]
-
 	print(f" --> {len(rows_changed)} parcels had their model group changed.")
 
 	# TODO: fix this
 	# Update sales for any rows that changed due to common area assignment
 	# df_sales = combine_dfs(df_sales, rows_changed, df2_stomps=True, index="key")
 
-	# Print stuff out
 	for mg_id in mg:
 		entry = mg[mg_id]
 		name = entry.get("name", mg_id)
 		_filter = entry.get("filter", [])
 		univ_index = resolve_filter(df_univ, _filter)
 		sales_index = resolve_filter(df_sales_hydrated, _filter)
-
 		if verbose:
 			valid_sales_index = sales_index & df_sales_hydrated["valid_sale"].eq(True)
 			improved_sales_index = sales_index & valid_sales_index & ~df_sales_hydrated["vacant_sale"].eq(True)
@@ -1448,27 +1706,24 @@ def _tag_model_groups_sup(
 			print(f"--> {valid_sales_index.sum():,} sales")
 			print(f"----> {improved_sales_index.sum():,} improved sales")
 			print(f"----> {vacant_sales_index.sum():,} vacant sales")
-
 	df_univ.loc[df_univ["model_group"].isna(), "model_group"] = "UNKNOWN"
-	#df_sales.loc[df_sales["model_group"].isna(), "model_group"] = "UNKNOWN"
-
 	sup.set("universe", df_univ)
 	sup.set("sales", df_sales)
-
 	return sup
 
 
 def _assign_modal_model_group_to_common_area(df_univ_in: gpd.GeoDataFrame, model_group_id: str, common_area_filters: list | None = None) -> gpd.GeoDataFrame:
 	"""
-	Assign the modal model_group of parcels inside an enveloping "COMMON AREA" parcel to the "COMMON AREA" parcel.
+  Assign the modal model_group of parcels inside an enveloping "COMMON AREA" parcel to that parcel.
 
-	Parameters:
-			df_univ (GeoDataFrame): GeoDataFrame containing the entire set of parcels.
+  Parameters:
+      df_univ_in (gpd.GeoDataFrame): GeoDataFrame containing all parcels.
+      model_group_id (str): Target model group identifier.
+      common_area_filters (list, optional): Filters to further select common area parcels.
 
-	Returns:
-			GeoDataFrame: Modified GeoDataFrame (df) with updated model_groups for COMMON AREA parcels.
-	"""
-
+  Returns:
+      gpd.GeoDataFrame: Modified GeoDataFrame with updated model_group for COMMON AREA parcels.
+  """
 	df_univ = df_univ_in.copy()
 
 	# Ensure geometry column is set
@@ -1524,32 +1779,23 @@ def _assign_modal_model_group_to_common_area(df_univ_in: gpd.GeoDataFrame, model
 		count1 = len(inside_parcels)
 
 		# Exclude the COMMON AREA parcel itself (if it is in df_univ)
-		inside_parcels = inside_parcels[
-			~inside_parcels.geometry.apply(lambda g: g.equals(common_area_geom))
-		]
+		inside_parcels = inside_parcels[~inside_parcels.geometry.apply(lambda g: g.equals(common_area_geom))]
 		count2 = len(inside_parcels)
 
 		# Optionally use a tiny negative buffer to avoid boundary issues
 
 		# Exclude parcels that are not wholly inside the COMMON AREA parcel (not just the envelope bounding box):
-
 		if isinstance(outer_polygon, np.ndarray):
 			if outer_polygon.size == 1:
 				outer_polygon = outer_polygon[0]
 			else:
 				# If there are multiple elements, combine them into one geometry
 				outer_polygon = unary_union(list(outer_polygon))
-
 			print("outer_polygon type:", type(outer_polygon))
-
-		inside_parcels = inside_parcels[
-			inside_parcels.geometry.centroid.within(outer_polygon)
-		]
-
+		inside_parcels = inside_parcels[inside_parcels.geometry.centroid.within(outer_polygon)]
 		count3 = len(inside_parcels)
 
 		print(f" {idx} --> {count1} parcels inside the envelope, {count2} after excluding the COMMON AREA, {count3} after excluding those not wholly inside the COMMON AREA")
-
 
 		# If it's empty, continue:
 		if inside_parcels.empty:
@@ -1570,13 +1816,8 @@ def _assign_modal_model_group_to_common_area(df_univ_in: gpd.GeoDataFrame, model
 			print(f" {idx} --> XXX modal model group is {modal_model_group} for {len(inside_parcels)} inside parcels")
 
 	df.to_parquet("out/look/common_area-2-tagged.parquet")
-
 	df_return = df_univ_in.copy()
-
 	# Update and return df_univ
-
 	df_return = combine_dfs(df_return, df[["key", "model_group"]], df2_stomps=True, index="key")
-
 	df_return.to_parquet("out/look/common_area-3-return.parquet")
-
 	return df_return
