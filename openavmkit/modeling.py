@@ -58,13 +58,42 @@ PredictionModel = Union[
 
 
 class PredictionResults:
+  """
+  Container for prediction results and associated performance metrics.
+
+  Attributes:
+      ind_var (str): The independent variable used for prediction
+      dep_vars (list[str]): List of dependent variables
+      y (numpy.ndarray): Ground truth values
+      y_pred (numpy.ndarray): Predicted values
+      mse (float): Mean squared error
+      rmse (float): Root mean squared error
+      r2 (float): R-squared
+      adj_r2 (float): Adjusted R-squared
+      ratio_study (RatioStudy): RatioStudy object
+  """
 
   def __init__(self,
       ind_var: str,
       dep_vars: list[str],
       prediction_field: str,
-      df: pd.DataFrame
-  ):
+      df: pd.DataFrame):
+    """
+    Initialize a PredictionResults instance.
+
+    Converts the specified prediction column in the DataFrame to a NumPy array,
+    computes performance metrics on the subset of data that is valid for ratio study,
+    and stores the computed values.
+
+    :param ind_var: The independent variable (e.g., sale price).
+    :type ind_var: str
+    :param dep_vars: List of dependent variable names.
+    :type dep_vars: list[str]
+    :param prediction_field: Name of the field containing model predictions.
+    :type prediction_field: str
+    :param df: DataFrame on which predictions were computed.
+    :type df: pandas.DataFrame
+    """
     self.ind_var = ind_var
     self.dep_vars = dep_vars
 
@@ -101,16 +130,28 @@ class PredictionResults:
 
     n = len(y_pred)
     k = len(dep_vars)
-
-    divisor = n-k-1
+    divisor = n - k - 1
     if divisor == 0:
       self.adj_r2 = float('inf')
     else:
-      self.adj_r2 = 1 - ((1 - self.r2)*(n-1)/divisor)
+      self.adj_r2 = 1 - ((1 - self.r2) * (n - 1) / divisor)
     self.ratio_study = RatioStudy(y_pred_clean, y_clean)
 
 
 class DataSplit:
+  """
+  Encapsulates the splitting of data into training, test, and other subsets. Handles all the internals and keeps things
+  organized so you don't have to worry about it.
+
+  Attributes:
+      df_sales (pd.DataFrame): Sales data after processing.
+      df_universe (pd.DataFrame): Universe (parcel) data after processing.
+      df_train (pd.DataFrame): Training subset of sales data.
+      df_test (pd.DataFrame): Test subset of sales data.
+      X_train, X_test, X_univ, etc.: Feature matrices for different subsets.
+      y_train, y_test: Target arrays for training and testing.
+      Other attributes store configuration and settings.
+  """
 
   counter: int = 0
 
@@ -130,8 +171,53 @@ class DataSplit:
       hedonic: bool = False,
       days_field: str = "sale_age_days",
       df_multiverse: pd.DataFrame | None = None,
-      init: bool = True
-  ):
+      init: bool = True):
+    """
+    Initialize a DataSplit instance by processing and splitting sales and universe data.
+
+    Performs several operations:
+     - Saves unmodified copies of original data.
+     - Adds missing columns to universe data.
+     - Enriches time fields and calculates sale age.
+     - Optionally processes multiverse data.
+     - Splits sales data into training and test sets.
+     - Pre-sorts data for rolling origin cross-validation.
+     - Applies interactions if specified.
+
+    :param df_sales: Sales DataFrame.
+    :type df_sales: pandas.DataFrame or None
+    :param df_universe: Universe (parcel) DataFrame.
+    :type df_universe: pandas.DataFrame or None
+    :param model_group: Model group identifier.
+    :type model_group: str
+    :param settings: Settings dictionary.
+    :type settings: dict
+    :param ind_var: Independent variable name.
+    :type ind_var: str
+    :param ind_var_test: Independent variable name for testing.
+    :type ind_var_test: str
+    :param dep_vars: List of dependent variable names.
+    :type dep_vars: list[str]
+    :param categorical_vars: List of categorical variable names.
+    :type categorical_vars: list[str]
+    :param interactions: Dictionary defining interactions between variables.
+    :type interactions: dict
+    :param test_keys: List of keys for test set.
+    :type test_keys: list[str]
+    :param train_keys: List of keys for training set.
+    :type train_keys: list[str]
+    :param vacant_only: Whether to consider only vacant sales.
+    :type vacant_only: bool, optional
+    :param hedonic: Whether to use hedonic adjustments.
+    :type hedonic: bool, optional
+    :param days_field: Field name for sale age in days.
+    :type days_field: str, optional
+    :param df_multiverse: Optional multiverse DataFrame.
+    :type df_multiverse: pandas.DataFrame or None
+    :param init: Whether to perform initialization (default True).
+    :type init: bool, optional
+    :raises ValueError: If required fields are missing.
+    """
     if not init:
       return
 
@@ -217,9 +303,13 @@ class DataSplit:
     self.days_field = days_field
     self.split()
 
-
   def copy(self):
-    # Return a deep copy
+    """
+    Return a deep copy of the DataSplit instance.
+
+    :returns: A deep copy of the current DataSplit.
+    :rtype: DataSplit
+    """
     ds = DataSplit(
       None,
       None,
@@ -274,24 +364,39 @@ class DataSplit:
       ds.df_multiverse_orig = None
     return ds
 
-
   def encode_categoricals_as_categories(self):
+    """
+    Convert all categorical variables in sales and universe DataFrames to the 'category' dtype.
 
+    :returns: The updated DataSplit instance.
+    :rtype: DataSplit
+    """
     if len(self.categorical_vars) == 0:
       return self
 
     ds = self.copy()
 
-    # Ensure all categorical variables are encoded with the "categorical" dtype:
     for col in ds.categorical_vars:
       ds.df_universe[col] = ds.df_universe[col].astype("category")
       ds.df_sales[col] = ds.df_sales[col].astype("category")
 
     return ds
 
-
   def encode_categoricals_with_one_hot(self):
+    """
+    One-hot encode the categorical variables in all data splits. One-hot encoding means that each unique value in a
+    categorical column is converted to a new column, and a 1 is placed in the new column for each row where the original
+    column had that value. This is useful for categorical variables that are not ordinal, and where the model should not
+    assume any particular order. For example, for a column 'color' with values 'red', 'green', and 'blue', the one-hot
+    encoding would create three new columns 'color_red', 'color_green', and 'color_blue', with 1s in the appropriate
+    column for each row.
 
+    Performs one-hot encoding for categorical variables in universe, sales, train, test, and multiverse DataFrames,
+    cleans column names, removes original categorical columns, and updates the dependent variable list accordingly.
+
+    :returns: The updated DataSplit instance with one-hot encoded features.
+    :rtype: DataSplit
+    """
     if len(self.categorical_vars) == 0:
       return self
 
@@ -360,9 +465,13 @@ class DataSplit:
 
     return ds
 
-
   def split(self):
+    """
+    Split the sales DataFrame into training and test sets based on provided keys.
 
+    Uses the test_keys and train_keys to partition the sales data. Also sorts the splits by the specified days_field.
+    If the model is hedonic, further filters the sales set to vacant records.
+    """
     test_keys = self.test_keys
     train_keys = self.train_keys
 
@@ -404,7 +513,6 @@ class DataSplit:
     _df_test = self.df_test.copy()
     _df_multi = self.df_multiverse.copy() if self.df_multiverse is not None else None
 
-    # if interactions is not empty, multiply the fields together:
     if self.interactions is not None and len(self.interactions) > 0:
       for parent_field, fill_field in self.interactions.items():
         target_fields = []
@@ -459,6 +567,27 @@ class DataSplit:
 
 
 class SingleModelResults:
+  """
+  Container for results from a single model prediction.
+
+  Attributes:
+      ds (DataSplit): The data split object used
+      df_universe (pd.DataFrame): Universe DataFrame
+      df_test (pd.DataFrame): Test DataFrame
+      df_sales (pd.DataFrame, optional): Sales DataFrame
+      df_multiverse (pd.DataFrame, optional): Multiverse DataFrame
+      type (str): Model type identifier
+      ind_var (str): Independent variable name
+      dep_vars (list[str]): Dependent variable names
+      model (PredictionModel): The model used for prediction
+      pred_test (PredictionResults): Results for the test set
+      pred_sales (PredictionResults, optional): Results for the sales set
+      pred_univ: Predictions for the universe (all parcels in the current scope, such as a model group)
+      pred_multi: Predictions for the multiverse (all parcels in all model groups)
+      chd (float): Calculated CHD value
+      utility (float): Composite utility score, used for comparing models
+      timing (TimingData): Timing data for different phases of the model run
+  """
 
   def __init__(self,
       ds: DataSplit,
@@ -471,8 +600,33 @@ class SingleModelResults:
       y_pred_univ: np.ndarray,
       timing: TimingData,
       verbose: bool = False,
-      y_pred_multi: np.ndarray | None = None
-  ):
+      y_pred_multi: np.ndarray | None = None):
+    """
+    Initialize SingleModelResults by attaching predictions and computing performance metrics.
+
+    :param ds: DataSplit object containing all necessary splits.
+    :type ds: DataSplit
+    :param field_prediction: The field name for predictions
+    :type field_prediction: str
+    :param field_horizontal_equity_id: The field name for the horizontal equity ID
+    :type field_horizontal_equity_id: str
+    :param type: Model type identifier
+    :type type: str
+    :param model: The model used
+    :type model: PredictionModel
+    :param y_pred_test: Predictions on the test set
+    :type y_pred_test: numpy.ndarray
+    :param y_pred_sales: Predictions on the sales set
+    :type y_pred_sales: numpy.ndarray or None
+    :param y_pred_univ: Predictions on the universe set
+    :type y_pred_univ: numpy.ndarray
+    :param timing: TimingData object.
+    :type timing: TimingData
+    :param verbose: Whether to print verbose output.
+    :type verbose: bool, optional
+    :param y_pred_multi: Predictions on the multiverse set
+    :type y_pred_multi: numpy.ndarray or None
+    """
     self.ds = ds
 
     df_univ = ds.df_universe.copy()
@@ -515,10 +669,8 @@ class SingleModelResults:
     self.pred_univ = y_pred_univ
     self.pred_multi = y_pred_multi
     timing.start("chd")
-    df_univ_valid = df_univ
-
+    df_univ_valid = df_univ.copy()
     df_univ_valid = pd.DataFrame(df_univ_valid)  # Ensure it's a Pandas DataFrame
-
     # drop problematic columns:
     df_univ_valid.drop(columns=["geometry"], errors="ignore", inplace=True)
 
@@ -526,9 +678,7 @@ class SingleModelResults:
     for col in df_univ_valid.columns:
       if df_univ_valid[col].dtype in ["category", "string"]:
         df_univ_valid[col] = df_univ_valid[col].astype("str")
-
     pl_df = pl.DataFrame(df_univ_valid)
-
     self.chd = quick_median_chd(pl_df, field_prediction, field_horizontal_equity_id)
     timing.stop("chd")
 
@@ -538,8 +688,16 @@ class SingleModelResults:
     self.timing = timing
 
   def summary(self):
-    str = ""
+    """
+    Generate a summary string of model performance.
 
+    The summary includes model type, number of rows in test & universe sets, RMSE, R², adjusted R²,
+    median ratio, COD, PRD, PRB, and CHD.
+
+    :returns: Summary string.
+    :rtype: str
+    """
+    str = ""
     str += f"Model type: {self.type}\n"
     # Print the # of rows in test & universe set
     # Print the MSE, RMSE, R2, and Adj R2 for test & universe set
@@ -560,22 +718,23 @@ class SingleModelResults:
     str += f"---->COD    : {self.pred_sales.ratio_study.cod:8.4f}\n"
     str += f"---->PRD    : {self.pred_sales.ratio_study.prd:8.4f}\n"
     str += f"---->PRB    : {self.pred_sales.ratio_study.prb:8.4f}\n"
-    str += f"---->CHD    : {self.chd:8.4f}\n"
+    str += f"---->CHD    : {self.pred_test.ratio_study.chd:8.4f}\n"
     str += f"\n"
     return str
 
 
-def model_utility_score(
-    model_results: SingleModelResults
-):
-  # We want to minimize:
-  # 1. error
-  # 2. the difference between the median ratio and 1
-  # 3. the COD
-  # 4. the CHD
+def model_utility_score(model_results: SingleModelResults):
+  """
+  Compute a utility score for a model based on error, median ratio, COD, and CHD. Lower scores are better.
 
-  # LOWER IS BETTER
+  This function is the weighted average of the following: median ratio distance from 1.0, COD, CHD. It also adds a
+  penalty for suspiciously low COD values, to punish sales chasing.
 
+  :param model_results: SingleModelResults object.
+  :type model_results: SingleModelResults
+  :returns: Computed utility score.
+  :rtype: float
+  """
   weight_dist_ratio = 1000.00
   weight_cod = 1.00
   weight_chd = 1.00
@@ -598,7 +757,19 @@ def model_utility_score(
   return final_score
 
 
-def safe_predict(callable, X: Any, params: Dict[str, Any]=None):
+def safe_predict(callable, X: Any, params: Dict[str, Any] = None):
+  """
+  Safely obtain predictions from a callable model function (Returns an empty array if the input is empty).
+
+  :param callable: Prediction function.
+  :type callable: callable
+  :param X: Input features.
+  :type X: Any
+  :param params: Additional parameters for the callable.
+  :type params: dict, optional
+  :returns: Predicted values as a NumPy array.
+  :rtype: numpy.ndarray
+  """
   if len(X) == 0:
     return np.array([])
   if params is None:
@@ -606,12 +777,21 @@ def safe_predict(callable, X: Any, params: Dict[str, Any]=None):
   return callable(X, **params)
 
 
-def predict_mra(
-    ds: DataSplit,
-    model: MRAModel,
-    timing: TimingData,
-    verbose: bool = False
-):
+def predict_mra(ds: DataSplit, model: MRAModel, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using a Multiple Regression Analysis (MRA) model.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param model: MRAModel instance.
+  :type model: MRAModel
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: SingleModelResults with predictions.
+  :rtype: SingleModelResults
+  """
   fitted_model: RegressionResults = model.fitted_model
 
   # predict on test set:
@@ -655,50 +835,71 @@ def predict_mra(
   return results
 
 
-def run_mra(
-    ds: DataSplit,
-    intercept: bool = True,
-    verbose: bool = False,
-    model: MRAModel | None = None
-):
-    timing = TimingData()
+def run_mra(ds: DataSplit, intercept: bool = True, verbose: bool = False, model: MRAModel | None = None):
+  """
+  Train an MRA model and return its prediction results.
 
-    timing.start("total")
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param intercept: Whether to include an intercept in the model.
+  :type intercept: bool, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :param model: Optional pre-trained MRAModel.
+  :type model: MRAModel or None
+  :returns: Prediction results from the MRA model.
+  :rtype: SingleModelResults
+  """
+  timing = TimingData()
 
-    timing.start("setup")
-    ds = ds.encode_categoricals_with_one_hot()
-    ds.split()
-    if intercept:
-      ds.X_train = sm.add_constant(ds.X_train)
-      ds.X_test = sm.add_constant(ds.X_test)
-      ds.X_sales = sm.add_constant(ds.X_sales)
-      ds.X_univ = sm.add_constant(ds.X_univ)
-      if ds.X_multiverse is not None:
-        ds.X_multiverse = sm.add_constant(ds.X_multiverse)
-    timing.stop("setup")
+  timing.start("total")
 
-    timing.start("parameter_search")
-    timing.stop("parameter_search")
+  timing.start("setup")
+  ds = ds.encode_categoricals_with_one_hot()
+  ds.split()
+  if intercept:
+    ds.X_train = sm.add_constant(ds.X_train)
+    ds.X_test = sm.add_constant(ds.X_test)
+    ds.X_sales = sm.add_constant(ds.X_sales)
+    ds.X_univ = sm.add_constant(ds.X_univ)
+    if ds.X_multiverse is not None:
+      ds.X_multiverse = sm.add_constant(ds.X_multiverse)
+  timing.stop("setup")
 
-    ds.X_train = ds.X_train.astype(float)
-    ds.y_train = ds.y_train.astype(float)
+  timing.start("parameter_search")
+  timing.stop("parameter_search")
 
-    timing.start("train")
-    if model is None:
-      linear_model = sm.OLS(ds.y_train, ds.X_train)
-      fitted_model = linear_model.fit()
-      model = MRAModel(fitted_model, intercept)
-    timing.stop("train")
+  ds.X_train = ds.X_train.astype(float)
+  ds.y_train = ds.y_train.astype(float)
 
-    return predict_mra(ds, model, timing, verbose)
+  timing.start("train")
+  if model is None:
+    linear_model = sm.OLS(ds.y_train, ds.X_train)
+    fitted_model = linear_model.fit()
+    model = MRAModel(fitted_model, intercept)
+  timing.stop("train")
+
+  return predict_mra(ds, model, timing, verbose)
 
 
-def predict_assessor(
-    ds: DataSplit,
-    assr_model: AssessorModel,
-    timing: TimingData,
-    verbose: bool = False
-):
+def predict_assessor(ds: DataSplit, assr_model: AssessorModel, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using an assessor model.
+
+  Uses the specified field from the assessor model (or the first dependent variable if hedonic)
+  to extract predictions directly from the input DataFrames.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param assr_model: AssessorModel instance.
+  :type assr_model: AssessorModel
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: SingleModelResults with assessor predictions.
+  :rtype: SingleModelResults
+  """
   field = assr_model.field
   if ds.hedonic:
     field = ds.dep_vars[0]
@@ -744,10 +945,17 @@ def predict_assessor(
   return results
 
 
-def run_assessor(
-    ds: DataSplit,
-    verbose: bool = False
-):
+def run_assessor(ds: DataSplit, verbose: bool = False):
+  """
+  Run an assessor model by performing data splitting and returning predictions.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the assessor model.
+  :rtype: SingleModelResults
+  """
   timing = TimingData()
 
   timing.start("total")
@@ -766,13 +974,21 @@ def run_assessor(
   return predict_assessor(ds, assr_model, timing, verbose)
 
 
-def predict_kernel(
-    ds: DataSplit,
-    kr: KernelReg,
-    timing: TimingData,
-    verbose: bool = False
-):
+def predict_kernel(ds: DataSplit, kr: KernelReg, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using a kernel regression model.
 
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param kr: KernelReg model instance.
+  :type kr: KernelReg
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the kernel regression model.
+  :rtype: SingleModelResults
+  """
   u_test = ds.df_test['longitude']
   v_test = ds.df_test['latitude']
 
@@ -797,7 +1013,6 @@ def predict_kernel(
   X_test = np.column_stack(vars_test)
   X_sales = np.column_stack(vars_sales)
   X_univ = np.column_stack(vars_univ)
-
 
   if ds.df_multiverse is not None:
     u_multi = ds.df_multiverse['longitude']
@@ -856,13 +1071,23 @@ def predict_kernel(
   return results
 
 
-def run_kernel(
-    ds: DataSplit,
-    outpath: str,
-    save_params: bool = False,
-    use_saved_params: bool = False,
-    verbose: bool = False
-):
+def run_kernel(ds: DataSplit, outpath: str, save_params: bool = False, use_saved_params: bool = False, verbose: bool = False):
+  """
+  Run a kernel regression model by tuning its bandwidth and returning predictions.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param outpath: Path to store output parameters.
+  :type outpath: str
+  :param save_params: Whether to save the tuned parameters.
+  :type save_params: bool, optional
+  :param use_saved_params: Whether to load saved parameters.
+  :type use_saved_params: bool, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the kernel regression model.
+  :rtype: SingleModelResults
+  """
   timing = TimingData()
 
   timing.start("total")
@@ -872,18 +1097,14 @@ def run_kernel(
   ds.split()
   u_train = ds.df_train['longitude']
   v_train = ds.df_train['latitude']
-
   vars_train = (u_train, v_train)
   for col in ds.X_train.columns:
     vars_train += (ds.X_train[col].to_numpy(),)
-
   X_train = np.column_stack(vars_train)
-
   y_train = ds.y_train.to_numpy()
   timing.stop("setup")
 
   timing.start("parameter_search")
-
   kernel_bw = None
   if use_saved_params:
     if os.path.exists(f"{outpath}/kernel_bw.pkl"):
@@ -918,14 +1139,25 @@ def run_kernel(
   return predict_kernel(ds, kr, timing, verbose)
 
 
-def predict_gwr(
-    ds: DataSplit,
-    gwr_model: GWRModel,
-    timing: TimingData,
-    verbose: bool,
-    diagnostic: bool = False,
-    intercept: bool = True
-):
+def predict_gwr(ds: DataSplit, gwr_model: GWRModel, timing: TimingData, verbose: bool, diagnostic: bool = False, intercept: bool = True):
+  """
+  Generate predictions using a Geographically Weighted Regression (GWR) model.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param gwr_model: GWRModel instance containing training data and parameters.
+  :type gwr_model: GWRModel
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool
+  :param diagnostic: If True, use diagnostic mode.
+  :type diagnostic: bool, optional
+  :param intercept: Whether the model includes an intercept.
+  :type intercept: bool, optional
+  :returns: Prediction results from the GWR model.
+  :rtype: SingleModelResults
+  """
   timing.start("train")
   # You have to re-train GWR before each prediction, so we move training to the predict function
   gwr = GWR(gwr_model.coords_train, gwr_model.y_train, gwr_model.X_train, gwr_model.gwr_bw)
@@ -955,11 +1187,10 @@ def predict_gwr(
 
   u = ds.df_universe['longitude']
   v = ds.df_universe['latitude']
-  coords_univ = list(zip(u,v))
+  coords_univ = list(zip(u, v))
 
   if ds.df_multiverse is not None:
-    X_multi = ds.X_multiverse.values
-    X_multi = X_multi.astype(np.float64)
+    X_multi = ds.X_multiverse.values.astype(np.float64)
     u_multi = ds.df_multiverse['longitude']
     v_multi = ds.df_multiverse['latitude']
     coords_multi = list(zip(u_multi, v_multi))
@@ -1045,23 +1276,24 @@ def predict_gwr(
   return results
 
 
-def run_gwr(
-    ds: DataSplit,
-    outpath: str,
-    save_params: bool = False,
-    use_saved_params: bool = False,
-    verbose: bool = False,
-    diagnostic: bool = False
-):
+def run_gwr(ds: DataSplit, outpath: str, save_params: bool = False, use_saved_params: bool = False, verbose: bool = False, diagnostic: bool = False):
   """
-  Runs a GWR model
-  :param ds: The data split object containing processed input data
-  :param outpath: The output path
-  :param save_params: Whether to save the parameters
-  :param use_saved_params: Whether to use saved parameters
-  :param verbose: Whether to print verbose output
-  :param diagnostic:
-  :return: The model results
+  Run a GWR model by tuning its bandwidth and generating predictions.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param outpath: Output path for saving parameters.
+  :type outpath: str
+  :param save_params: Whether to save tuned parameters.
+  :type save_params: bool, optional
+  :param use_saved_params: Whether to load saved parameters.
+  :type use_saved_params: bool, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :param diagnostic: If True, run in diagnostic mode.
+  :type diagnostic: bool, optional
+  :returns: Prediction results from the GWR model.
+  :rtype: SingleModelResults
   """
   timing = TimingData()
 
@@ -1137,12 +1369,21 @@ def run_gwr(
   return predict_gwr(ds, gwr_model, timing, verbose, diagnostic)
 
 
-def predict_xgboost(
-    ds: DataSplit,
-    xgboost_model: xgboost.XGBRegressor,
-    timing: TimingData,
-    verbose: bool = False
-):
+def predict_xgboost(ds: DataSplit, xgboost_model: xgboost.XGBRegressor, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using an XGBoost model.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param xgboost_model: Trained XGBRegressor instance.
+  :type xgboost_model: xgboost.XGBRegressor
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the XGBoost model.
+  :rtype: SingleModelResults
+  """
   timing.start("predict_test")
   y_pred_test = safe_predict(xgboost_model.predict, ds.X_test)
   timing.stop("predict_test")
@@ -1180,21 +1421,22 @@ def predict_xgboost(
   return results
 
 
-def run_xgboost(
-    ds: DataSplit,
-    outpath: str,
-    save_params: bool = False,
-    use_saved_params: bool = False,
-    verbose: bool = False
-):
+def run_xgboost(ds: DataSplit, outpath: str, save_params: bool = False, use_saved_params: bool = False, verbose: bool = False):
   """
-  Runs an XGBoost model
-  :param ds: The data split object containing processed input data
-  :param outpath: The output path
-  :param save_params: Whether to save the parameters
-  :param use_saved_params: Whether to use saved parameters
-  :param verbose: Whether to print verbose output
-  :return: The model results
+  Run an XGBoost model by tuning parameters, training, and predicting.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param outpath: Output path for saving parameters.
+  :type outpath: str
+  :param save_params: Whether to save tuned parameters.
+  :type save_params: bool, optional
+  :param use_saved_params: Whether to load saved parameters.
+  :type use_saved_params: bool, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the XGBoost model.
+  :rtype: SingleModelResults
   """
   timing = TimingData()
 
@@ -1210,25 +1452,28 @@ def run_xgboost(
   timing.stop("parameter_search")
 
   timing.start("train")
-
   xgboost_model = xgboost.XGBRegressor(**params)
   xgboost_model.fit(ds.X_train, ds.y_train)
   timing.stop("train")
 
-  return predict_xgboost(
-    ds,
-    xgboost_model,
-    timing,
-    verbose
-  )
+  return predict_xgboost(ds, xgboost_model, timing, verbose)
 
 
-def predict_lightgbm(
-    ds: DataSplit,
-    gbm: lgb.Booster,
-    timing: TimingData,
-    verbose: bool = False
-):
+def predict_lightgbm(ds: DataSplit, gbm: lgb.Booster, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using a LightGBM model.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param gbm: Trained LightGBM Booster.
+  :type gbm: lgb.Booster
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the LightGBM model.
+  :rtype: SingleModelResults
+  """
   timing.start("predict_test")
   y_pred_test = safe_predict(gbm.predict, ds.X_test, {"num_iteration": gbm.best_iteration})
   timing.stop("predict_test")
@@ -1266,21 +1511,22 @@ def predict_lightgbm(
   return results
 
 
-def run_lightgbm(
-    ds: DataSplit,
-    outpath: str,
-    save_params: bool = False,
-    use_saved_params: bool = False,
-    verbose: bool = False
-):
+def run_lightgbm(ds: DataSplit, outpath: str, save_params: bool = False, use_saved_params: bool = False, verbose: bool = False):
   """
-  Runs a LightGBM model
-  :param ds: The data split object containing processed input data
-  :param outpath: The output path
-  :param save_params: Whether to save the parameters
-  :param use_saved_params: Whether to use saved parameters
-  :param verbose: Whether to print verbose output
-  :return: The model results
+  Run a LightGBM model by tuning parameters, training, and predicting.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param outpath: Output path for saving parameters.
+  :type outpath: str
+  :param save_params: Whether to save tuned parameters.
+  :type save_params: bool, optional
+  :param use_saved_params: Whether to load saved parameters.
+  :type use_saved_params: bool, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the LightGBM model.
+  :rtype: SingleModelResults
   """
   timing = TimingData()
 
@@ -1298,7 +1544,7 @@ def run_lightgbm(
   timing.start("train")
   cat_vars = [var for var in ds.categorical_vars if var in ds.X_train.columns.values]
   lgb_train = lgb.Dataset(ds.X_train, ds.y_train, categorical_feature=cat_vars)
-  lgb_test = lgb.Dataset(ds.X_test,  ds.y_test,  categorical_feature=cat_vars, reference=lgb_train)
+  lgb_test = lgb.Dataset(ds.X_test, ds.y_test, categorical_feature=cat_vars, reference=lgb_train)
 
   params["verbosity"] = -1
 
@@ -1321,12 +1567,21 @@ def run_lightgbm(
   return predict_lightgbm(ds, gbm, timing, verbose)
 
 
-def predict_catboost(
-    ds: DataSplit,
-    catboost_model: catboost.CatBoostRegressor,
-    timing: TimingData,
-    verbose: bool = False
-):
+def predict_catboost(ds: DataSplit, catboost_model: catboost.CatBoostRegressor, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using a CatBoost model.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param catboost_model: Trained CatBoostRegressor.
+  :type catboost_model: catboost.CatBoostRegressor
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the CatBoost model.
+  :rtype: SingleModelResults
+  """
   cat_vars = [var for var in ds.categorical_vars if var in ds.X_train.columns.values]
 
   timing.start("predict_test")
@@ -1383,21 +1638,22 @@ def predict_catboost(
   return results
 
 
-def run_catboost(
-    ds: DataSplit,
-    outpath: str,
-    save_params: bool = False,
-    use_saved_params: bool = False,
-    verbose: bool = False
-):
+def run_catboost(ds: DataSplit, outpath: str, save_params: bool = False, use_saved_params: bool = False, verbose: bool = False):
   """
-  Runs a CatBoost model
-  :param ds: The data split object containing processed input data
-  :param outpath: The output path
-  :param save_params: Whether to save the parameters
-  :param use_saved_params: Whether to use saved parameters
-  :param verbose: Whether to print verbose output
-  :return: The model results
+  Run a CatBoost model by tuning parameters, training, and predicting.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param outpath: Output path for saving parameters.
+  :type outpath: str
+  :param save_params: Whether to save tuned parameters.
+  :type save_params: bool, optional
+  :param use_saved_params: Whether to load saved parameters.
+  :type use_saved_params: bool, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the CatBoost model.
+  :rtype: SingleModelResults
   """
   timing = TimingData()
 
@@ -1408,13 +1664,11 @@ def run_catboost(
   timing.stop("parameter_search")
 
   timing.start("setup")
-
   params["verbose"] = False
   params["train_dir"] = outpath
   cat_vars = [var for var in ds.categorical_vars if var in ds.X_train.columns.values]
   catboost_model = catboost.CatBoostRegressor(**params)
   train_pool = Pool(data=ds.X_train, label=ds.y_train, cat_features=cat_vars)
-
   timing.stop("setup")
 
   timing.start("train")
@@ -1424,12 +1678,25 @@ def run_catboost(
   return predict_catboost(ds, catboost_model, timing, verbose)
 
 
-def predict_garbage(
-    ds: DataSplit,
-    garbage_model: GarbageModel,
-    timing: TimingData,
-    verbose: bool = False
-):
+def predict_garbage(ds: DataSplit, garbage_model: GarbageModel, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using a "garbage" model that produces random values.
+
+  If sales_chase is specified, adjusts predictions to simulate sales chasing behavior.
+
+  Needless to say, you should not use this model in production.  
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param garbage_model: GarbageModel instance containing configuration.
+  :type garbage_model: GarbageModel
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the garbage model.
+  :rtype: SingleModelResults
+  """
   timing.start("predict_test")
   normal = garbage_model.normal
   min_value = garbage_model.min_value
@@ -1501,19 +1768,20 @@ def predict_garbage(
   return results
 
 
-def run_garbage(
-    ds: DataSplit,
-    normal: bool = False,
-    sales_chase: float = 0.0,
-    verbose: bool = False
-):
+def run_garbage(ds: DataSplit, normal: bool = False, sales_chase: float = 0.0, verbose: bool = False):
   """
-  Runs a garbage model that simply predicts random values between the min and max of the training set.
-  :param ds: The data split object containing processed input data
-  :param normal: Whether to use a normal or uniform distribution when randomly picking
-  :param sales_chase: If not 0, simulate sales chasing by predicting the sales set as the test set, with this much noise
-  :param verbose: Whether to print verbose output
-  :return: The model results
+  Run a garbage model that predicts random values within a range derived from the training set.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param normal: If True, use a normal distribution; otherwise, use a uniform distribution.
+  :type normal: bool, optional
+  :param sales_chase: Factor for simulating sales chasing (default 0.0 means no adjustment).
+  :type sales_chase: float, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the garbage model.
+  :rtype: SingleModelResults
   """
   timing = TimingData()
 
@@ -1537,18 +1805,26 @@ def run_garbage(
   return predict_garbage(ds, garbage_model, timing, verbose)
 
 
-def predict_average(
-    ds: DataSplit,
-    average_model: AverageModel,
-    timing: TimingData,
-    verbose: bool = False
-):
+def predict_average(ds: DataSplit, average_model: AverageModel, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions by simply using the average (mean or median) of the training set.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param average_model: AverageModel instance with configuration.
+  :type average_model: AverageModel
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the average model.
+  :rtype: SingleModelResults
+  """
   timing.start("predict_test")
   type = average_model.type
   sales_chase = average_model.sales_chase
 
   if type == "median":
-    # get a series of equal length to ds.X_test filled with the mean of the training set
     y_pred_test = np.full(len(ds.X_test), ds.y_train.median())
   else:
     y_pred_test = np.full(len(ds.X_test), ds.y_train.mean())
@@ -1613,19 +1889,20 @@ def predict_average(
   return results
 
 
-def run_average(
-    ds: DataSplit,
-    average_type: str = "mean",
-    sales_chase: float = 0.0,
-    verbose: bool = False
-):
+def run_average(ds: DataSplit, average_type: str = "mean", sales_chase: float = 0.0, verbose: bool = False):
   """
-  Runs a garbage model that simply predicts the average of the training set for everything
-  :param ds: The data split object containing processed input data
-  :param average_type: The type of average to use ("mean" or "median")
-  :param sales_chase: If not 0, simulate sales chasing by predicting the sales set as the test set, with this much noise
-  :param verbose: Whether to print verbose output
-  :return: The model results
+  Run an average model that predicts either the mean or median of the training set for all predictions.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param average_type: "mean" or "median" indicating which statistic to use.
+  :type average_type: str, optional
+  :param sales_chase: Factor for simulating sales chasing (default 0.0 means no adjustment).
+  :type sales_chase: float, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the average model.
+  :rtype: SingleModelResults
   """
   timing = TimingData()
 
@@ -1646,12 +1923,24 @@ def run_average(
   return predict_average(ds, average_model, timing, verbose)
 
 
-def predict_naive_sqft(
-    ds: DataSplit,
-    sqft_model: NaiveSqftModel,
-    timing: TimingData,
-    verbose: bool = False
-):
+def predict_naive_sqft(ds: DataSplit, sqft_model: NaiveSqftModel, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using a naive per-square-foot model.
+
+  Separately computes predictions for improved and vacant properties based on bldg_area_finished_sqft
+  and land_area_sqft, then combines them.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param sqft_model: NaiveSqftModel instance containing per-square-foot multipliers.
+  :type sqft_model: NaiveSqftModel
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the naive sqft model.
+  :rtype: SingleModelResults
+  """
   timing.start("predict_test")
 
   ind_per_built_sqft = sqft_model.ind_per_built_sqft
@@ -1737,17 +2026,18 @@ def predict_naive_sqft(
   return results
 
 
-def run_naive_sqft(
-    ds: DataSplit,
-    sales_chase: float = 0.0,
-    verbose: bool = False
-):
+def run_naive_sqft(ds: DataSplit, sales_chase: float = 0.0, verbose: bool = False):
   """
-  Runs a garbage model that simply predicts the median $/sqft of the training set for everything
-  :param ds: The data split object containing processed input data
-  :param sales_chase: If not 0, simulate sales chasing by predicting the sales set as the test set, with this much noise
-  :param verbose: Whether to print verbose output
-  :return: The model results
+  Run a naive per-square-foot model that predicts based on median $/sqft from the training set.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param sales_chase: Factor for simulating sales chasing (default 0.0 means no adjustment).
+  :type sales_chase: float, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the naive sqft model.
+  :rtype: SingleModelResults
   """
   timing = TimingData()
 
@@ -1787,12 +2077,24 @@ def run_naive_sqft(
   return predict_naive_sqft(ds, sqft_model, timing, verbose)
 
 
-def predict_local_sqft(
-    ds: DataSplit,
-    sqft_model: LocalSqftModel,
-    timing: TimingData,
-    verbose: bool = False
-):
+def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using a local per-square-foot model that uses location-specific values.
+
+  Merges local per-square-foot values computed for different location fields with the test set,
+  and then computes predictions based on improved and vacant properties.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param sqft_model: LocalSqftModel instance containing location-specific multipliers.
+  :type sqft_model: LocalSqftModel
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the local sqft model.
+  :rtype: SingleModelResults
+  """
   timing.start("predict_test")
 
   loc_map = sqft_model.loc_map
@@ -1952,19 +2254,20 @@ def predict_local_sqft(
   return results
 
 
-def run_local_sqft(
-    ds: DataSplit,
-    location_fields: list[str],
-    sales_chase: float = 0.0,
-    verbose: bool = False
-):
+def run_local_sqft(ds: DataSplit, location_fields: list[str], sales_chase: float = 0.0, verbose: bool = False):
   """
-  Runs a model that simply predicts the median $/sqft of the training set on a per-location basis
-  :param ds: The data split object containing processed input data
-  :param location_fields: The fields to use for location-based prediction
-  :param sales_chase: If not 0, simulate sales chasing by predicting the sales set as the test set, with this much noise
-  :param verbose: Whether to print verbose output
-  :return: The model results
+  Run a local per-square-foot model that predicts values based on location-specific median $/sqft.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param location_fields: List of location field names to use.
+  :type location_fields: list[str]
+  :param sales_chase: Factor for simulating sales chasing (default 0.0 means no adjustment).
+  :type sales_chase: float, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the local sqft model.
+  :rtype: SingleModelResults
   """
   timing = TimingData()
 
@@ -2060,14 +2363,24 @@ def run_local_sqft(
   sqft_model = LocalSqftModel(loc_map, location_fields, overall_per_impr_sqft, overall_per_land_sqft, sales_chase)
   return predict_local_sqft(ds, sqft_model, timing, verbose)
 
-# Private:
+
+# Private functions:
 
 def _sales_chase_univ(df_in, ind_var, y_pred_univ):
   """
-  Simulates sales chasing (obviously never use this in a real model, only intended for studying bad behavior)
-  :param df_in:
-  :param y_pred_univ:
-  :return:
+  Simulate sales chasing behavior for universe predictions.
+
+  Intended for studying bad behavior; adjusts predictions such that if the observed value is greater than zero,
+  it uses the observed value. Should not be used in actual production.
+
+  :param df_in: Input DataFrame.
+  :type df_in: pandas.DataFrame
+  :param ind_var: Independent variable column name.
+  :type ind_var: str
+  :param y_pred_univ: Array of predictions for the universe.
+  :type y_pred_univ: numpy.ndarray
+  :returns: Adjusted predictions as a NumPy array.
+  :rtype: numpy.ndarray
   """
   df_univ = df_in[[ind_var]].copy()
   df_univ["prediction"] = y_pred_univ.copy()
@@ -2077,27 +2390,22 @@ def _sales_chase_univ(df_in, ind_var, y_pred_univ):
 
 def _gwr_predict(model, points, P, exog_scale=None, exog_resid=None, fit_params=None):
   """
-  Standalone function for GWR predictions for a larger set of samples in one go.
+  Standalone function for GWR predictions for multiple samples.
 
-  Parameters
-  ----------
-  model        : GWR instance
-                 The trained GWR model.
-  points       : array-like
-                 n*2, collection of n sets of (x,y) coordinates for prediction.
-  P            : array-like
-                 n*k, independent variables for prediction.
-  exog_scale   : scalar, optional
-                 Estimated scale from the training set. If None, computed from the model.
-  exog_resid   : array-like, optional
-                 Residuals from the training set. If None, computed from the model.
-  fit_params   : dict, optional
-                 Parameters for fitting the model.
-
-  Returns
-  -------
-  results      : dict
-                 A dictionary with keys "params" and "predy" containing the predictions.
+  :param model: Trained GWR model.
+  :type model: GWR
+  :param points: Array-like (n*2) of (x, y) coordinates for prediction.
+  :type points: array-like
+  :param P: Array-like (n*k) of independent variables for prediction.
+  :type P: array-like
+  :param exog_scale: Optional scale from training; if None, computed from the model.
+  :type exog_scale: scalar, optional
+  :param exog_resid: Optional residuals from training; if None, computed from the model.
+  :type exog_resid: array-like, optional
+  :param fit_params: Additional parameters for fitting.
+  :type fit_params: dict, optional
+  :returns: Dictionary with keys "params" and "y_pred".
+  :rtype: dict
   """
   if fit_params is None:
     fit_params = {}
@@ -2131,12 +2439,20 @@ def _gwr_predict(model, points, P, exog_scale=None, exog_resid=None, fit_params=
 
 
 def _local_gwr_predict_external(model, point, predictors):
-  # Ensure point and predictors are NumPy arrays
-  point = np.asarray(point).reshape(1, -1)  # shape: (1, 2)
-  predictors = np.asarray(predictors)
+  """
+  Helper function for GWR prediction on a single point.
 
-  # Use Kernel with points, giving i=0
-  # This tells Kernel: "Compute distances from points[0] to model.coords"
+  :param model: Trained GWR model.
+  :type model: GWR
+  :param point: Single (x, y) coordinate.
+  :type point: array-like
+  :param predictors: Predictor vector for the point.
+  :type predictors: array-like
+  :returns: Tuple of (local betas, predicted value).
+  :rtype: tuple(numpy.ndarray, float)
+  """
+  point = np.asarray(point).reshape(1, -1)
+  predictors = np.asarray(predictors)
   weights = Kernel(
     0,
     model.coords,
@@ -2154,18 +2470,36 @@ def _local_gwr_predict_external(model, point, predictors):
   y_pred = np.dot(predictors, betas)[0]
   return betas.reshape(-1), y_pred
 
-def _run_gwr_prediction(
-    coords,
-    coords_train,
-    X,
-    X_train,
-    gwr_bw,
-    y_train,
-    plot: bool = False,
-    gdf: gpd.GeoDataFrame = None,
-    dep_vars: list[str] = None,
-    intercept: bool = True
-):
+
+def _run_gwr_prediction(coords, coords_train, X, X_train, gwr_bw, y_train, plot: bool = False, gdf: gpd.GeoDataFrame = None, dep_vars: list[str] = None, intercept: bool = True):
+  """
+  Run GWR predictions for a set of points.
+
+  Uses the _gwr_predict function to obtain predictions, with optional plotting for diagnostic purposes.
+
+  :param coords: List of coordinate tuples for prediction.
+  :type coords: list
+  :param coords_train: Training set coordinates.
+  :type coords_train: list
+  :param X: Predictor matrix for prediction.
+  :type X: numpy.ndarray
+  :param X_train: Predictor matrix for training.
+  :type X_train: numpy.ndarray
+  :param gwr_bw: Bandwidth for GWR.
+  :type gwr_bw: float
+  :param y_train: Training target values.
+  :type y_train: numpy.ndarray
+  :param plot: If True, produce diagnostic plots.
+  :type plot: bool, optional
+  :param gdf: Optional GeoDataFrame for plotting.
+  :type gdf: geopandas.GeoDataFrame, optional
+  :param dep_vars: List of dependent variable names.
+  :type dep_vars: list[str], optional
+  :param intercept: Whether an intercept is used.
+  :type intercept: bool, optional
+  :returns: Predicted values as a NumPy array.
+  :rtype: numpy.ndarray
+  """
   gwr = GWR(coords_train, y_train, X_train, gwr_bw, constant=intercept)
   gwr_results = _gwr_predict(gwr, coords, X)
   y_pred = gwr_results["y_pred"]
@@ -2214,7 +2548,29 @@ def _run_gwr_prediction(
   return y_pred
 
 
-def _get_params(name:str, slug:str, ds:DataSplit, tune_func, outpath:str, save_params:bool, use_saved_params:bool, verbose:bool, **kwargs):
+def _get_params(name: str, slug: str, ds: DataSplit, tune_func, outpath: str, save_params: bool, use_saved_params: bool, verbose: bool, **kwargs):
+  """
+  Obtain model parameters by tuning, with option to save or load saved parameters.
+
+  :param name: Name of the model.
+  :type name: str
+  :param slug: Slug identifier for file naming.
+  :type slug: str
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param tune_func: Function to tune parameters.
+  :type tune_func: callable
+  :param outpath: Output path for saving parameters.
+  :type outpath: str
+  :param save_params: Whether to save tuned parameters.
+  :type save_params: bool
+  :param use_saved_params: Whether to load saved parameters.
+  :type use_saved_params: bool
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool
+  :returns: Tuned model parameters as a dictionary.
+  :rtype: dict
+  """
   if verbose:
     print(f"Tuning {name}: searching for optimal parameters...")
 
@@ -2234,13 +2590,24 @@ def _get_params(name:str, slug:str, ds:DataSplit, tune_func, outpath:str, save_p
   return params
 
 
-def plot_value_surface(
-    title: str,
-    values: np.array,
-    gdf: gpd.GeoDataFrame,
-    cmap: str = None,
-    norm: str = None
-):
+def plot_value_surface(title: str, values: np.array, gdf: gpd.GeoDataFrame, cmap: str = None, norm: str = None):
+  """
+  Plot a value surface over spatial data.
+
+  Creates a plot of the given values on the geometries in the provided GeoDataFrame using a color map and normalization.
+
+  :param title: Plot title.
+  :type title: str
+  :param values: Array of values to plot.
+  :type values: numpy.ndarray
+  :param gdf: GeoDataFrame containing geometries.
+  :type gdf: geopandas.GeoDataFrame
+  :param cmap: Colormap to use (default "coolwarm" if None).
+  :type cmap: str, optional
+  :param norm: Normalization method: "two_slope", "log", or None.
+  :type norm: str, optional
+  :returns: None
+  """
   plt.clf()
   plt.figure(figsize=(12, 8))
 
