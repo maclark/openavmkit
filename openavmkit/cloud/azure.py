@@ -53,6 +53,7 @@ def init_service_azure(credentials: AzureCredentials, access: CloudAccess) -> Az
     service = AzureService(credentials, container_name, access)
   else:
     raise ValueError("Invalid credentials for Azure service.")
+  return service
 
 
 def get_creds_from_env_azure() -> AzureCredentials:

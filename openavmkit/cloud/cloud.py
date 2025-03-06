@@ -11,6 +11,8 @@ def init(verbose: bool) -> CloudService | None:
   load_dotenv()
   cloud_type = os.getenv("CLOUD_TYPE")
   cloud_access = os.getenv("CLOUD_ACCESS")
+  if verbose:
+    print(f"Initializing cloud service of type '{cloud_type}' with access '{cloud_access}'...")
   if cloud_type is None:
     raise ValueError("Missing 'CLOUD_TYPE' in environment. Have you created your .env file and properly filled it out?")
   if cloud_access is None:
@@ -43,6 +45,7 @@ def _get_creds_from_env() -> CloudCredentials:
 
 
 def _init_service(cloud_type: CloudType, cloud_access: CloudAccess, credentials: CloudCredentials) -> CloudService:
+  print(f"_init_service('{cloud_type}', '{cloud_access}')")
   if cloud_type == "azure":
     return init_service_azure(credentials, cloud_access)
   elif cloud_type == "huggingface":

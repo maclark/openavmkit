@@ -538,7 +538,7 @@ def cloud_sync(locality: str, verbose: bool = False, dry_run: bool = False):
       print("Cloud service not initialized, skipping...")
       return
 
-   remote_path = locality.replace("-", "/")
+   remote_path = locality.replace("-", "/") + "/"
    cloud_service.sync_files(locality, "in", remote_path, dry_run=dry_run, verbose=verbose)
 
 

@@ -1250,9 +1250,9 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
   :raises ValueError: If an unsupported file extension is encountered.
   """
 	filename = entry.get("filename", "")
-	filename = f"in/{filename}"
 	if filename == "":
 		return None
+	filename = f"in/{filename}"
 	ext = str(filename).split(".")[-1]
 
 	column_names = _snoop_column_names(filename)
