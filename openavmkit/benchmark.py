@@ -2033,7 +2033,8 @@ def _run_models(
 		f.write(var_report_md)
 
 	pdf_path = f"{outpath}/reports/variable_report.pdf"
-	_markdown_to_pdf(var_report_md, pdf_path, css_file="variable")
+	formats = settings.get("analysis", {}).get("report", {}).get("formats", None)
+	_markdown_to_pdf(var_report_md, pdf_path, css_file="variable", formats=formats)
 
 	any_results = False
 
