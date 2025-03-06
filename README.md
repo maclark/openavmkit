@@ -115,6 +115,11 @@ And you will return to your normal command prompt.
 pip install -r requirements.txt
 ```
 
+Then there's another dependency you have to install manually:
+```bash
+pip install tabulate --upgrade
+```
+
 # Quick Start
 
 Once you've set up your python environment and dependencies, here's the basic guide to get you started:
