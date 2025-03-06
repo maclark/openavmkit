@@ -70,10 +70,7 @@ def finish_report(report: MarkdownReport, outpath: str, css_file: str, settings:
     f.write(report_text)
   pdf_path = f"{outpath}.pdf"
 
-  try:
-    _markdown_to_pdf(report_text, pdf_path, formats=formats, css_file=css_file)
-  except OSError:
-    warnings.warn("Failed to generate PDF report. Is `wkhtmltopdf` installed? See the README for details.")
+  _markdown_to_pdf(report_text, pdf_path, formats=formats, css_file=css_file)
 
   if "md" not in formats:
     os.remove(f"{outpath}.md")
@@ -131,7 +128,11 @@ def _markdown_to_html(md_text, css_file_stub=None):
 
 
 def _html_to_pdf(html_text, out_path):
-  pdfkit.from_string(html_text, out_path, options={"quiet": False})
+  try:
+    pdfkit.from_string(html_text, out_path, options={"quiet": False})
+  except OSError:
+    warnings.warn("Failed to generate PDF report. Is `wkhtmltopdf` installed? See the README for details.")
+
 
 
 def _get_resource_path():
