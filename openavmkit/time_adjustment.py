@@ -10,10 +10,14 @@ from openavmkit.utilities.data import div_z_safe
 
 def _generate_days(start_date: datetime, end_date: datetime):
   """
-  This function generates a list of days between start_date and end_date, inclusively.
-  :param start_date:
-  :param end_date:
-  :return:
+  Generate a list of days between two dates, inclusive.
+
+  :param start_date: The starting date.
+  :type start_date: datetime
+  :param end_date: The ending date.
+  :type end_date: datetime
+  :returns: List of dates as strings in "YYYY-MM-DD" format.
+  :rtype: list[str]
   """
   days = []
   date = start_date
@@ -24,6 +28,20 @@ def _generate_days(start_date: datetime, end_date: datetime):
 
 
 def _get_expected_periods(df: pd.DataFrame, period: str):
+  """
+  Determine the expected time periods from the DataFrame based on sale dates.
+
+  Ensures the 'sale_date' column is of datetime type, then generates a list
+  of periods (Year, Quarter, Month, or Day) spanning from the earliest to latest sale date.
+
+  :param df: Input DataFrame that must contain a 'sale_date' column.
+  :type df: pandas.DataFrame
+  :param period: Period type, one of "Y", "Q", "M", or "D".
+  :type period: str
+  :returns: List of expected periods.
+  :rtype: list
+  :raises ValueError: If 'sale_date' is missing or period is invalid.
+  """
   if "sale_date" not in df:
     raise ValueError("Field 'sale_date' not found in the DataFrame.")
   else:
@@ -62,11 +80,17 @@ def _get_expected_periods(df: pd.DataFrame, period: str):
 
 def _convert_periods_to_middle_days(periods: list[str], period_type: str):
   """
-  This function converts a list of periods like years, months, or quarters, into the middle day of each period. We use
-  the middle day because it is the single day that best represents the median value for the entire period.
-  :param periods:
-  :param period_type:
-  :return:
+  Convert a list of periods into the middle day of each period.
+
+  For each period (year, quarter, or month), the function computes the midpoint date,
+  which represents the median day of the period.
+
+  :param periods: List of period identifiers (e.g. "2020Q1", "2020-05").
+  :type periods: list[str]
+  :param period_type: The type of period ("Q", "M", or "Y").
+  :type period_type: str
+  :returns: List of middle-day dates as strings in "YYYY-MM-DD" format.
+  :rtype: list[str]
   """
   days = []
   if period_type == "Q":
@@ -94,11 +118,27 @@ def _convert_periods_to_middle_days(periods: list[str], period_type: str):
       last_day = datetime.strptime(f"{year}-12-31", "%Y-%m-%d")
       mid_day = first_day + (last_day - first_day) / 2
       days.append(mid_day.strftime("%Y-%m-%d"))
-
   return days
 
 
 def _flatten_periods_to_days(df_in: pd.DataFrame, df_crunched: pd.DataFrame, period: str, verbose=False):
+  """
+  Flatten crunched period data to daily resolution.
+
+  Maps the crunched periods to their corresponding middle-day representations,
+  sets 'period' as the index, and interpolates missing daily values.
+
+  :param df_in: Original DataFrame with sales data.
+  :type df_in: pandas.DataFrame
+  :param df_crunched: DataFrame with crunched period values.
+  :type df_crunched: pandas.DataFrame
+  :param period: Original period type ("Y", "Q", or "M").
+  :type period: str
+  :param verbose: If True, prints progress information.
+  :type verbose: bool, optional
+  :returns: DataFrame with daily periods and interpolated median values.
+  :rtype: pandas.DataFrame
+  """
   periods_expected = _get_expected_periods(df_in, "D")
   old_periods = df_crunched["period"].values
   periods_actual = _convert_periods_to_middle_days(df_crunched["period"].values, period)
@@ -125,7 +165,21 @@ def _flatten_periods_to_days(df_in: pd.DataFrame, df_crunched: pd.DataFrame, per
 
 
 def _interpolate_missing_periods(periods_expected, periods_actual, df_median):
-  # Ensure periods_actual only includes periods in periods_expected
+  """
+  Interpolate missing median values for expected periods.
+
+  Constructs a Series of median values aligned with the expected periods,
+  interpolates missing values linearly, and fills edge NaNs.
+
+  :param periods_expected: List of expected period identifiers.
+  :type periods_expected: list
+  :param periods_actual: List of actual period identifiers from the crunched data.
+  :type periods_actual: list
+  :param df_median: DataFrame with median values indexed by period.
+  :type df_median: pandas.DataFrame
+  :returns: Numpy array of interpolated median values.
+  :rtype: numpy.ndarray
+  """
   periods_actual = [p for p in periods_actual if p in periods_expected]
 
   # Create a mapping of periods_actual to their corresponding median values
@@ -150,6 +204,23 @@ def _interpolate_missing_periods(periods_expected, periods_actual, df_median):
 
 
 def _crunch_time_adjustment(df_in: pd.DataFrame, field: str, period: str = "M", min_count: int = 5):
+  """
+  Crunch sales data by computing median sale price per sqft over specified time periods.
+
+  Groups the sales data by period (Year, Quarter, or Month) and computes the median value for the specified field,
+  then filters groups with fewer than min_count sales and normalizes the values.
+
+  :param df_in: Input sales DataFrame.
+  :type df_in: pandas.DataFrame
+  :param field: Field name to crunch (e.g., sale price per sqft).
+  :type field: str
+  :param period: Time period type ("M", "Q", or "Y").
+  :type period: str, optional
+  :param min_count: Minimum number of sales required for a period to be considered.
+  :type min_count: int, optional
+  :returns: DataFrame with crunched period and median value.
+  :rtype: pandas.DataFrame
+  """
   df = df_in[df_in[field].gt(0)].copy()
 
   if period == "Y":
@@ -196,7 +267,19 @@ def _crunch_time_adjustment(df_in: pd.DataFrame, field: str, period: str = "M", 
 
 
 def _determine_value_driver(df_in: pd.DataFrame, settings: dict):
-  # We want to determine if this modeling group's values are driven by land or improvement
+  """
+  Determine whether land or improvement drives the value in the modeling group.
+
+  Compares median sale prices per sqft for improved and land properties and returns "land" if the relative
+  difference is small and a significant portion of sales are land; otherwise returns "impr".
+
+  :param df_in: Input sales DataFrame.
+  :type df_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :returns: "land" or "impr" indicating the primary value driver.
+  :rtype: str
+  """
   df = df_in.copy()
 
   df = get_sales(df, settings)
@@ -223,6 +306,20 @@ def _determine_value_driver(df_in: pd.DataFrame, settings: dict):
 
 
 def _determine_time_resolution(df_per, sale_field, min_sale_count, period: str = "M"):
+  """
+  Determine the appropriate time resolution (Month, Quarter, or Year) based on sales counts.
+
+  :param df_per: Sales DataFrame with computed sale price per sqft.
+  :type df_per: pandas.DataFrame
+  :param sale_field: Field used for sale price per sqft.
+  :type sale_field: str
+  :param min_sale_count: Minimum sales count threshold.
+  :type min_sale_count: int
+  :param period: Current period type ("M", "Q", or "Y").
+  :type period: str, optional
+  :returns: Adjusted period type.
+  :rtype: str
+  """
   months_total = 0
   months_missing = 0
 
@@ -254,7 +351,23 @@ def _determine_time_resolution(df_per, sale_field, min_sale_count, period: str =
 
 
 def calculate_time_adjustment(df_sales_in: pd.DataFrame, settings: dict, period: str = "M", verbose: bool = False):
+  """
+  Calculate a time adjustment multiplier for sales data.
 
+  Processes sales data to compute a median sale price per sqft over time (at a resolution determined dynamically),
+  interpolates missing values, and returns a DataFrame with daily time adjustment multipliers.
+
+  :param df_sales_in: Input sales DataFrame.
+  :type df_sales_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param period: Initial period type ("M", "Q", or "Y").
+  :type period: str, optional
+  :param verbose: Whether to print progress information.
+  :type verbose: bool, optional
+  :returns: DataFrame with time adjustment values per day.
+  :rtype: pandas.DataFrame
+  """
   if verbose:
     print("Calculating time adjustment...")
 
@@ -302,6 +415,20 @@ def calculate_time_adjustment(df_sales_in: pd.DataFrame, settings: dict, period:
 
 
 def apply_time_adjustment(df_sales_in: pd.DataFrame, settings, period: str = "M", verbose=False):
+  """
+  Computes time adjustment multipliers and applies them to adjust sale prices forward in time.
+
+  :param df_sales_in: Input sales DataFrame.
+  :type df_sales_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param period: Period type to use ("M", "Q", or "Y").
+  :type period: str, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Sales DataFrame with an added 'sale_price_time_adj' column.
+  :rtype: pandas.DataFrame
+  """
   df_sales = df_sales_in.copy()
   df_time = calculate_time_adjustment(df_sales_in, settings, period, verbose)
 
@@ -352,11 +479,19 @@ def apply_time_adjustment(df_sales_in: pd.DataFrame, settings, period: str = "M"
   return df_sales
 
 
-def enrich_time_adjustment(
-    df_in: pd.DataFrame,
-    settings: dict,
-    verbose: bool = False
-):
+def enrich_time_adjustment(df_in: pd.DataFrame, settings: dict, verbose: bool = False):
+  """
+  Enrich the sales data by generating time adjusted sales if not already present.
+
+  :param df_in: Input sales DataFrame.
+  :type df_in: pandas.DataFrame
+  :param settings: Settings dictionary.
+  :type settings: dict
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Enriched sales DataFrame.
+  :rtype: pandas.DataFrame
+  """
   df = df_in.copy()
 
   # Gather settings
