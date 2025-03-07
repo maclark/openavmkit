@@ -115,7 +115,7 @@ And you will return to your normal command prompt.
 pip install -r requirements.txt
 ```
 
-Then there's another dependency you have to install manually:
+Then there's another dependency you have to install manually, ignore the warnings it gives you, it's fine:
 ```bash
 pip install tabulate --upgrade
 ```
@@ -225,7 +225,7 @@ For information on how to use Jupyter notebooks in general, refer to the [offici
 
 ## Creating a new locality
 
-OpenAVMKit operates on the concept of a "locality", which is a geographic area that contains a set of properties. This can represent a city, a council, a neighborhood, or any other region or jurisdiction you want to analyze. To set one up, create a folder like this within openavmkit's `notebooks/` directory:
+OpenAVMKit operates on the concept of a "locality", which is a geographic area that contains a set of properties. This can represent a city, a county, a neighborhood, or any other region or jurisdiction you want to analyze. To set one up, create a folder like this within openavmkit's `notebooks/` directory:
 
 ```
 data/<locality_slug>/
@@ -241,7 +241,7 @@ Where `<locality_slug>` is a unique identifying name for your locality in a part
 
 - **State/province code**: The 2-letter state or province code according to the [ISO 3166-2 standard](https://en.wikipedia.org/wiki/ISO_3166-2). For example, the state code for Texas is `tx`, and the state code for California is `ca`.
 
-- **Locality name**: A human-readable name for the locality itself.
+- **Locality name**: A human-readable name for the locality itself. This follows no particular standard and is entirely up to you.
 
 The slug itself should be all lowercase and contain no spaces or special characters other than underscores.
 
