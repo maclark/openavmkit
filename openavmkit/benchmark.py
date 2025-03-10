@@ -169,18 +169,18 @@ def get_variable_recommendations(
 	feature_selection = settings.get("modeling", {}).get("instructions", {}).get("feature_selection", {})
 	thresh = feature_selection.get("thresholds", {})
 
-	X_sales = ds.X_sales[ds.dep_vars]
+	X_sales = ds.X_sales[ds.ind_vars]
 	y_sales = ds.y_sales
 
 	# Correlation
-	X_corr = ds.df_sales[[ds.ind_var] + ds.dep_vars]
+	X_corr = ds.df_sales[[ds.dep_var] + ds.ind_vars]
 	corr_results = calc_correlations(X_corr, thresh.get("correlation", 0.1))
 
 	# Elastic net regularization
 	enr_coefs = calc_elastic_net_regularization(X_sales, y_sales, thresh.get("enr", 0.01))
 
 	# R² values
-	r2_values = calc_r2(ds.df_sales, ds.dep_vars, y_sales)
+	r2_values = calc_r2(ds.df_sales, ds.ind_vars, y_sales)
 
 	# P Values
 	p_values = calc_p_values_recursive_drop(X_sales, y_sales, thresh.get("p_value", 0.05))
@@ -602,12 +602,12 @@ def _get_data_split_for(
 		name: str,
 		model_group: str,
 		location_fields: list[str] | None,
-		dep_vars: list[str],
+		ind_vars: list[str],
 		df_sales: pd.DataFrame,
 		df_universe: pd.DataFrame,
 		settings: dict,
-		ind_var: str,
-		ind_var_test: str,
+		dep_var: str,
+		dep_var_test: str,
 		fields_cat: list[str],
 		interactions: dict,
 		test_keys: list[str],
@@ -625,18 +625,18 @@ def _get_data_split_for(
   :type model_group: str
   :param location_fields: List of location fields.
   :type location_fields: list[str] or None
-  :param dep_vars: List of dependent variables.
-  :type dep_vars: list[str]
+  :param ind_vars: List of independent variables.
+  :type ind_vars: list[str]
   :param df_sales: Sales DataFrame.
   :type df_sales: pandas.DataFrame
   :param df_universe: Universe DataFrame.
   :type df_universe: pandas.DataFrame
   :param settings: The settings dictionary.
   :type settings: dict
-  :param ind_var: Independent variable for training.
-  :type ind_var: str
-  :param ind_var_test: Independent variable for testing.
-  :type ind_var_test: str
+  :param dep_var: Dependent variable for training.
+  :type dep_var: str
+  :param dep_var_test: Dependent variable for testing.
+  :type dep_var_test: str
   :param fields_cat: List of categorical fields.
   :type fields_cat: list[str]
   :param interactions: Dictionary of variable interactions.
@@ -661,15 +661,15 @@ def _get_data_split_for(
 	elif name == "assessor":
 		_dep_vars = ["assr_land_value"] if hedonic else ["assr_market_value"]
 	else:
-		_dep_vars = dep_vars
+		_dep_vars = ind_vars
 
 	return DataSplit(
 		df_sales,
 		df_universe,
 		model_group,
 		settings,
-		ind_var,
-		ind_var_test,
+		dep_var,
+		dep_var_test,
 		_dep_vars,
 		fields_cat,
 		interactions,
@@ -690,8 +690,8 @@ def _run_one_model(
 		model: str,
 		model_entries: dict,
 		settings: dict,
-		ind_var: str,
-		ind_var_test: str,
+		dep_var: str,
+		dep_var_test: str,
 		best_variables: list[str],
 		fields_cat: list[str],
 		outpath: str,
@@ -720,10 +720,10 @@ def _run_one_model(
   :type model_entries: dict
   :param settings: Settings dictionary.
   :type settings: dict
-  :param ind_var: Independent variable for training.
-  :type ind_var: str
-  :param ind_var_test: Independent variable for testing.
-  :type ind_var_test: str
+  :param dep_var: Dependent variable for training.
+  :type dep_var: str
+  :param dep_var_test: Dependent variable for testing.
+  :type dep_var_test: str
   :param best_variables: List of best variables selected.
   :type best_variables: list[str]
   :param fields_cat: List of categorical fields.
@@ -766,15 +766,15 @@ def _run_one_model(
 	if verbose:
 		print(f" running model {model} on {len(df_sales)} rows...")
 
-	are_dep_vars_default = entry.get("dep_vars", None) is None
-	dep_vars: list | None = entry.get("dep_vars", default_entry.get("dep_vars", None))
-	if dep_vars is None:
-		raise ValueError(f"dep_vars not found for model {model}")
+	are_dep_vars_default = entry.get("ind_vars", None) is None
+	ind_vars: list | None = entry.get("ind_vars", default_entry.get("ind_vars", None))
+	if ind_vars is None:
+		raise ValueError(f"ind_vars not found for model {model}")
 
 	if are_dep_vars_default and verbose:
-		if set(dep_vars) != set(best_variables):
+		if set(ind_vars) != set(best_variables):
 			print(f"--> using default variables, auto-optimized variable list: {best_variables}")
-		dep_vars = best_variables
+		ind_vars = best_variables
 
 	interactions = get_variable_interactions(entry, settings, df_sales)
 	location_fields = get_locations(settings, df_sales)
@@ -784,12 +784,12 @@ def _run_one_model(
 		name=model_name,
 		model_group=model_group,
 		location_fields=location_fields,
-		dep_vars=dep_vars,
+		ind_vars=ind_vars,
 		df_sales=df_sales,
 		df_universe=df_universe,
 		settings=settings,
-		ind_var=ind_var,
-		ind_var_test=ind_var_test,
+		dep_var=dep_var,
+		dep_var_test=dep_var_test,
 		fields_cat=fields_cat,
 		interactions=interactions,
 		test_keys=test_keys,
@@ -953,8 +953,8 @@ def _optimize_ensemble_allocation(
 		df_universe: pd.DataFrame | None,
 		model_group: str,
 		vacant_only: bool,
-		ind_var: str,
-		ind_var_test: str,
+		dep_var: str,
+		dep_var_test: str,
 		all_results: MultiModelResults,
 		settings: dict,
 		verbose: bool = False,
@@ -972,10 +972,10 @@ def _optimize_ensemble_allocation(
   :type model_group: str
   :param vacant_only: Whether to use only vacant sales.
   :type vacant_only: bool
-  :param ind_var: Independent variable for training.
-  :type ind_var: str
-  :param ind_var_test: Independent variable for testing.
-  :type ind_var_test: str
+  :param dep_var: Dependent variable for training.
+  :type dep_var: str
+  :param dep_var_test: Dependent variable for testing.
+  :type dep_var_test: str
   :param all_results: MultiModelResults containing individual model results.
   :type all_results: MultiModelResults
   :param settings: Settings dictionary.
@@ -1005,8 +1005,8 @@ def _optimize_ensemble_allocation(
 		df_universe,
 		model_group,
 		settings,
-		ind_var,
-		ind_var_test,
+		dep_var,
+		dep_var_test,
 		[],
 		[],
 		{},
@@ -1159,8 +1159,8 @@ def _optimize_ensemble(
 		df_universe: pd.DataFrame | None,
 		model_group: str,
 		vacant_only: bool,
-		ind_var: str,
-		ind_var_test: str,
+		dep_var: str,
+		dep_var_test: str,
 		all_results: MultiModelResults,
 		settings: dict,
 		verbose: bool = False,
@@ -1178,10 +1178,10 @@ def _optimize_ensemble(
   :type model_group: str
   :param vacant_only: Whether to use only vacant sales.
   :type vacant_only: bool
-  :param ind_var: Independent variable for training.
-  :type ind_var: str
-  :param ind_var_test: Independent variable for testing.
-  :type ind_var_test: str
+  :param dep_var: Dependent variable for training.
+  :type dep_var: str
+  :param dep_var_test: Dependent variable for testing.
+  :type dep_var_test: str
   :param all_results: MultiModelResults containing model results.
   :type all_results: MultiModelResults
   :param settings: Settings dictionary.
@@ -1210,8 +1210,8 @@ def _optimize_ensemble(
 		df_universe,
 		model_group,
 		settings,
-		ind_var,
-		ind_var_test,
+		dep_var,
+		dep_var_test,
 		[],
 		[],
 		{},
@@ -1340,8 +1340,8 @@ def _run_ensemble(
 		model_group: str,
 		vacant_only: bool,
 		hedonic: bool,
-		ind_var: str,
-		ind_var_test: str,
+		dep_var: str,
+		dep_var_test: str,
 		outpath: str,
 		ensemble_list: list[str],
 		all_results: MultiModelResults,
@@ -1362,10 +1362,10 @@ def _run_ensemble(
   :type vacant_only: bool
   :param hedonic: Whether to use hedonic pricing.
   :type hedonic: bool
-  :param ind_var: Independent variable for training.
-  :type ind_var: str
-  :param ind_var_test: Independent variable for testing.
-  :type ind_var_test: str
+  :param dep_var: Dependent variable for training.
+  :type dep_var: str
+  :param dep_var_test: Dependent variable for testing.
+  :type dep_var_test: str
   :param outpath: Output path for results.
   :type outpath: str
   :param ensemble_list: List of models to include in the ensemble.
@@ -1391,8 +1391,8 @@ def _run_ensemble(
 		df_universe,
 		model_group,
 		settings,
-		ind_var,
-		ind_var_test,
+		dep_var,
+		dep_var_test,
 		[],
 		[],
 		{},
@@ -1518,16 +1518,16 @@ def _prepare_ds(
 	model_entries = s_model.get("models", {}).get(vacant_status, {})
 	entry: dict | None = model_entries.get("model", model_entries.get("default", {}))
 
-	dep_vars: list | None = entry.get("dep_vars", None)
-	if dep_vars is None:
-		raise ValueError(f"dep_vars not found for model 'default'")
+	ind_vars: list | None = entry.get("ind_vars", None)
+	if ind_vars is None:
+		raise ValueError(f"ind_vars not found for model 'default'")
 
 	fields_cat = get_fields_categorical(s, df_sales)
 	interactions = get_variable_interactions(entry, s, df_sales)
 
 	instructions = s.get("modeling", {}).get("instructions", {})
-	ind_var = instructions.get("ind_var", "sale_price")
-	ind_var_test = instructions.get("ind_var_test", "sale_price_time_adj")
+	dep_var = instructions.get("dep_var", "sale_price")
+	dep_var_test = instructions.get("dep_var_test", "sale_price_time_adj")
 
 	test_keys, train_keys = _read_split_keys(model_group)
 
@@ -1536,9 +1536,9 @@ def _prepare_ds(
 		df_universe=df_universe,
 		model_group=model_group,
 		settings=settings,
-		ind_var=ind_var,
-		ind_var_test=ind_var_test,
-		dep_vars=dep_vars,
+		dep_var=dep_var,
+		dep_var_test=dep_var_test,
+		ind_vars=ind_vars,
 		categorical_vars=fields_cat,
 		interactions=interactions,
 		test_keys=test_keys,
@@ -1824,8 +1824,8 @@ def _run_hedonic_models(
 		all_results: MultiModelResults,
 		df_sales: pd.DataFrame,
 		df_universe: pd.DataFrame,
-		ind_var: str,
-		ind_var_test: str,
+		dep_var: str,
+		dep_var_test: str,
 		fields_cat: list[str],
 		use_saved_results: bool = True,
 		verbose: bool = False,
@@ -1848,10 +1848,10 @@ def _run_hedonic_models(
   :type df_sales: pandas.DataFrame
   :param df_universe: Universe DataFrame.
   :type df_universe: pandas.DataFrame
-  :param ind_var: Independent variable for training.
-  :type ind_var: str
-  :param ind_var_test: Independent variable for testing.
-  :type ind_var_test: str
+  :param dep_var: Dependent variable for training.
+  :type dep_var: str
+  :param dep_var_test: Dependent variable for testing.
+  :type dep_var_test: str
   :param fields_cat: List of categorical fields.
   :type fields_cat: list[str]
   :param use_saved_results: Whether to use saved results if available.
@@ -1881,12 +1881,12 @@ def _run_hedonic_models(
 			name=model,
 			model_group=model_group,
 			location_fields=location_fields,
-			dep_vars=smr.dep_vars,
+			ind_vars=smr.ind_vars,
 			df_sales=df_sales,
 			df_universe=df_universe,
 			settings=settings,
-			ind_var=ind_var,
-			ind_var_test=ind_var_test,
+			dep_var=dep_var,
+			dep_var_test=dep_var_test,
 			fields_cat=fields_cat,
 			interactions=smr.ds.interactions.copy(),
 			test_keys=smr.ds.test_keys,
@@ -1921,8 +1921,8 @@ def _run_hedonic_models(
 		df_universe=df_universe,
 		model_group=model_group,
 		vacant_only=vacant_only,
-		ind_var=ind_var,
-		ind_var_test=ind_var_test,
+		dep_var=dep_var,
+		dep_var_test=dep_var_test,
 		all_results=all_hedonic_results,
 		settings=settings,
 		verbose=verbose,
@@ -1935,8 +1935,8 @@ def _run_hedonic_models(
 		model_group=model_group,
 		vacant_only=vacant_only,
 		hedonic=True,
-		ind_var=ind_var,
-		ind_var_test=ind_var_test,
+		dep_var=dep_var,
+		dep_var_test=dep_var_test,
 		outpath=outpath,
 		ensemble_list=best_ensemble,
 		all_results=all_results,
@@ -1999,8 +1999,8 @@ def _run_models(
 	s_inst = s_model.get("instructions", {})
 	vacant_status = "vacant" if vacant_only else "main"
 
-	ind_var = s_inst.get("ind_var", "sale_price")
-	ind_var_test = s_inst.get("ind_var_test", "sale_price_time_adj")
+	dep_var = s_inst.get("dep_var", "sale_price")
+	dep_var_test = s_inst.get("dep_var_test", "sale_price_time_adj")
 	fields_cat = get_fields_categorical(s, df_univ)
 	models_to_run = s_inst.get(vacant_status, {}).get("run", None)
 	model_entries = s_model.get("models").get(vacant_status, {})
@@ -2049,8 +2049,8 @@ def _run_models(
 			model=model,
 			model_entries=model_entries,
 			settings=settings,
-			ind_var=ind_var,
-			ind_var_test=ind_var_test,
+			dep_var=dep_var,
+			dep_var_test=dep_var_test,
 			best_variables=best_variables,
 			fields_cat=fields_cat,
 			outpath=outpath,
@@ -2080,8 +2080,8 @@ def _run_models(
 		df_universe=df_univ,
 		model_group=model_group,
 		vacant_only=vacant_only,
-		ind_var=ind_var,
-		ind_var_test=ind_var_test,
+		dep_var=dep_var,
+		dep_var_test=dep_var_test,
 		all_results=all_results,
 		settings=settings,
 		verbose=verbose
@@ -2094,8 +2094,8 @@ def _run_models(
 		model_group=model_group,
 		vacant_only=vacant_only,
 		hedonic=False,
-		ind_var=ind_var,
-		ind_var_test=ind_var_test,
+		dep_var=dep_var,
+		dep_var_test=dep_var_test,
 		outpath=outpath,
 		ensemble_list=best_ensemble,
 		all_results=all_results,
@@ -2127,8 +2127,8 @@ def _run_models(
 			all_results=all_results,
 			df_sales=df_sales,
 			df_universe=df_univ,
-			ind_var=ind_var,
-			ind_var_test=ind_var_test,
+			dep_var=dep_var,
+			dep_var_test=dep_var_test,
 			fields_cat=fields_cat,
 			use_saved_results=use_saved_results,
 			verbose=verbose,

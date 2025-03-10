@@ -144,7 +144,7 @@ class KDTreeNode:
 # Fitting & COD for a Node
 ############################
 
-def fit_power_law_node(df: pd.DataFrame, node: KDTreeNode, ind_var: str, size_var: str):
+def fit_power_law_node(df: pd.DataFrame, node: KDTreeNode, dep_var: str, size_var: str):
   """
   Fit power law Price ~ a * (size^(-b)) using only the data in node.data_indices.
   Update node.a, node.b in-place.
@@ -152,7 +152,7 @@ def fit_power_law_node(df: pd.DataFrame, node: KDTreeNode, ind_var: str, size_va
   idx = node.data_indices
 
   sizes = df[size_var].values[idx]
-  prices = df[ind_var].values[idx]
+  prices = df[dep_var].values[idx]
 
   # We want a>0, b in (0,1)
   lower_bounds = (1e-9, 0.0)
@@ -259,7 +259,7 @@ def split_node(node: KDTreeNode, df: gpd.GeoDataFrame, split_vertical:int, min_c
 def build_kdtree(
     df: gpd.GeoDataFrame,
     root_node: KDTreeNode,
-    ind_var: str,
+    dep_var: str,
     size_var: str,
     min_samples: int,
     max_depth: int
@@ -268,7 +268,7 @@ def build_kdtree(
   Recursively fit local power law
   """
   # 1. Fit local power-law
-  fit_power_law_node(df, root_node, ind_var, size_var)
+  fit_power_law_node(df, root_node, dep_var, size_var)
 
   # 2. Check split conditions
   if (
@@ -294,7 +294,7 @@ def build_kdtree(
         continue
 
       for child in children:
-        fit_power_law_node(df, child, ind_var, size_var)
+        fit_power_law_node(df, child, dep_var, size_var)
 
       if split_vertical:
         vertical_children = children
@@ -318,7 +318,7 @@ def build_kdtree(
 
     root_node.children = best_children
     for child in best_children:
-      build_kdtree(df, child, ind_var, size_var, min_samples, max_depth)
+      build_kdtree(df, child, dep_var, size_var, min_samples, max_depth)
 
 
 ############################
@@ -582,7 +582,7 @@ def kdtree_predict(
 
 def run_spatial_tree(
     df_in: gpd.GeoDataFrame,
-    ind_var: str,
+    dep_var: str,
     size_var: str,
     cod_threshold: float = 20.0,
     min_samples: int = 10,
@@ -622,7 +622,7 @@ def run_spatial_tree(
   all_indices = np.arange(len(df))
   root_node = KDTreeNode(min_x, max_x, min_y, max_y, all_indices, depth=0)
 
-  build_kdtree(df, root_node, ind_var, size_var, cod_threshold, min_samples, max_depth)
+  build_kdtree(df, root_node, dep_var, size_var, cod_threshold, min_samples, max_depth)
 
   # 3) Make predictions
   # Try some test location near middle

@@ -127,11 +127,11 @@ def _finalize_land_values(
   df_sales["model_market_value_impr_sqft"] = div_field_z_safe(df_sales["model_market_value"], df_sales["bldg_area_finished_sqft"])
   df_sales["model_market_value_land_sqft"] = div_field_z_safe(df_sales["model_market_value"], df_sales["land_area_sqft"])
 
-  dep_vars = settings.get("modeling", {}).get("models", {}).get("main", {}).get("default", {}).get("dep_vars", [])
-  dep_vars = dep_vars + ["assr_market_value", "assr_land_value", "model_market_value", "model_market_value_land_sqft", "model_market_value_impr_sqft"]
+  ind_vars = settings.get("modeling", {}).get("models", {}).get("main", {}).get("default", {}).get("ind_vars", [])
+  ind_vars = ind_vars + ["assr_market_value", "assr_land_value", "model_market_value", "model_market_value_land_sqft", "model_market_value_impr_sqft"]
 
   print("LAND VALUE")
-  X_corr = df_sales[["model_land_value"] + dep_vars]
+  X_corr = df_sales[["model_land_value"] + ind_vars]
   corrs = calc_correlations(X_corr)
   print("INITIAL")
   display(corrs["initial"])
@@ -140,7 +140,7 @@ def _finalize_land_values(
   display(corrs["final"])
   print("")
   print("LAND VALUE PER SQFT")
-  X_corr = df_sales[["model_land_value_land_sqft"] + dep_vars]
+  X_corr = df_sales[["model_land_value_land_sqft"] + ind_vars]
   corrs = calc_correlations(X_corr)
   print("INITIAL")
   display(corrs["initial"])
@@ -884,8 +884,8 @@ def _run_land_analysis(
     df=None,
     model_group=model_group,
     vacant_only=True,
-    ind_var="sale_price_time_adj",
-    ind_var_test="sale_price_time_adj",
+    dep_var="sale_price_time_adj",
+    dep_var_test="sale_price_time_adj",
     all_results=all_land_results,
     settings=settings,
     verbose=verbose
@@ -899,8 +899,8 @@ def _run_land_analysis(
     model_group=model_group,
     vacant_only=True,
     hedonic=False,
-    ind_var="sale_price_time_adj",
-    ind_var_test="sale_price_time_adj",
+    dep_var="sale_price_time_adj",
+    dep_var_test="sale_price_time_adj",
     outpath=outpath,
     ensemble_list=best_ensemble,
     all_results=all_land_results,

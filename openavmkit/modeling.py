@@ -62,8 +62,8 @@ class PredictionResults:
   Container for prediction results and associated performance metrics.
 
   Attributes:
-      ind_var (str): The independent variable used for prediction
-      dep_vars (list[str]): List of dependent variables
+      dep_var (str): The independent variable used for prediction
+      ind_vars (list[str]): List of dependent variables
       y (numpy.ndarray): Ground truth values
       y_pred (numpy.ndarray): Predicted values
       mse (float): Mean squared error
@@ -74,8 +74,8 @@ class PredictionResults:
   """
 
   def __init__(self,
-      ind_var: str,
-      dep_vars: list[str],
+      dep_var: str,
+      ind_vars: list[str],
       prediction_field: str,
       df: pd.DataFrame):
     """
@@ -85,19 +85,19 @@ class PredictionResults:
     computes performance metrics on the subset of data that is valid for ratio study,
     and stores the computed values.
 
-    :param ind_var: The independent variable (e.g., sale price).
-    :type ind_var: str
-    :param dep_vars: List of dependent variable names.
-    :type dep_vars: list[str]
+    :param dep_var: The independent variable (e.g., sale price).
+    :type dep_var: str
+    :param ind_vars: List of dependent variable names.
+    :type ind_vars: list[str]
     :param prediction_field: Name of the field containing model predictions.
     :type prediction_field: str
     :param df: DataFrame on which predictions were computed.
     :type df: pandas.DataFrame
     """
-    self.ind_var = ind_var
-    self.dep_vars = dep_vars
+    self.dep_var = dep_var
+    self.ind_vars = ind_vars
 
-    y = df[ind_var].to_numpy()
+    y = df[dep_var].to_numpy()
     y_pred = df[prediction_field].to_numpy()
 
     self.y = y
@@ -105,7 +105,7 @@ class PredictionResults:
 
     df_valid = df[df["valid_for_ratio_study"].eq(True)]
 
-    y = df_valid[ind_var].to_numpy()
+    y = df_valid[dep_var].to_numpy()
     y_pred = df_valid[prediction_field].to_numpy()
 
     y_clean = y[~pd.isna(y_pred)]
@@ -129,7 +129,7 @@ class PredictionResults:
     # k: The number of predictor variables
 
     n = len(y_pred)
-    k = len(dep_vars)
+    k = len(ind_vars)
     divisor = n - k - 1
     if divisor == 0:
       self.adj_r2 = float('inf')
@@ -160,9 +160,9 @@ class DataSplit:
       df_universe: pd.DataFrame | None,
       model_group: str,
       settings: dict,
-      ind_var: str,
-      ind_var_test: str,
-      dep_vars: list[str],
+      dep_var: str,
+      dep_var_test: str,
+      ind_vars: list[str],
       categorical_vars: list[str],
       interactions: dict,
       test_keys: list[str],
@@ -192,12 +192,12 @@ class DataSplit:
     :type model_group: str
     :param settings: Settings dictionary.
     :type settings: dict
-    :param ind_var: Independent variable name.
-    :type ind_var: str
-    :param ind_var_test: Independent variable name for testing.
-    :type ind_var_test: str
-    :param dep_vars: List of dependent variable names.
-    :type dep_vars: list[str]
+    :param dep_var: Dependent variable name.
+    :type dep_var: str
+    :param dep_var_test: Dependent variable name for testing.
+    :type dep_var_test: str
+    :param ind_vars: List of independent variable names.
+    :type ind_vars: list[str]
     :param categorical_vars: List of categorical variable names.
     :type categorical_vars: list[str]
     :param interactions: Dictionary defining interactions between variables.
@@ -292,9 +292,9 @@ class DataSplit:
       raise ValueError(f"Field '{days_field}' not found in dataframe.")
 
     self.model_group = model_group
-    self.ind_var = ind_var
-    self.ind_var_test = ind_var_test
-    self.dep_vars = dep_vars.copy()
+    self.dep_var = dep_var
+    self.dep_var_test = dep_var_test
+    self.ind_vars = ind_vars.copy()
     self.categorical_vars = categorical_vars.copy()
     self.interactions = interactions.copy()
     self.one_hot_descendants = {}
@@ -348,9 +348,9 @@ class DataSplit:
     ds.train_keys = self.train_keys.copy()
     ds.vacant_only = self.vacant_only
     ds.hedonic = self.hedonic
-    ds.ind_var = self.ind_var
-    ds.ind_var_test = self.ind_var_test
-    ds.dep_vars = self.dep_vars.copy()
+    ds.dep_var = self.dep_var
+    ds.dep_var_test = self.dep_var_test
+    ds.ind_vars = self.ind_vars.copy()
     ds.categorical_vars = self.categorical_vars.copy()
     ds.interactions = self.interactions.copy()
     ds.one_hot_descendants = self.one_hot_descendants.copy()
@@ -402,9 +402,9 @@ class DataSplit:
 
     ds = self.copy()
 
-    dep_vars = self.dep_vars
+    ind_vars = self.ind_vars
 
-    cat_vars = [col for col in dep_vars if col in self.categorical_vars]
+    cat_vars = [col for col in ind_vars if col in self.categorical_vars]
 
     old_cols = ds.df_universe.columns.values
 
@@ -431,9 +431,9 @@ class DataSplit:
       ds.df_multiverse = ds.df_multiverse.drop(columns=[col for col in cat_vars if col in ds.df_multiverse])
 
     new_cols = [col for col in ds.df_train.columns.values if col not in old_cols]
-    dep_vars += new_cols
-    dep_vars = [col for col in dep_vars if col in ds.df_train.columns]
-    ds.dep_vars = dep_vars
+    ind_vars += new_cols
+    ind_vars = [col for col in ind_vars if col in ds.df_train.columns]
+    ds.ind_vars = ind_vars
 
     # sort cat vars so the longest strings come first:
     cat_vars = sorted(cat_vars, key=len, reverse=True)
@@ -532,21 +532,21 @@ class DataSplit:
           if _df_multi is not None and target_field in _df_multi:
             _df_multi[target_field] = _df_multi[target_field] * _df_multi[fill_field]
 
-    dep_vars = [col for col in self.dep_vars if col in _df_univ.columns]
-    self.X_univ = _df_univ[dep_vars]
+    ind_vars = [col for col in self.ind_vars if col in _df_univ.columns]
+    self.X_univ = _df_univ[ind_vars]
 
-    dep_vars = [col for col in self.dep_vars if col in _df_sales.columns]
-    self.X_sales = _df_sales[dep_vars]
-    self.y_sales = _df_sales[self.ind_var]
+    ind_vars = [col for col in self.ind_vars if col in _df_sales.columns]
+    self.X_sales = _df_sales[ind_vars]
+    self.y_sales = _df_sales[self.dep_var]
 
-    dep_vars = [col for col in self.dep_vars if col in _df_train.columns]
-    self.X_train = _df_train[dep_vars]
-    self.y_train = _df_train[self.ind_var]
+    ind_vars = [col for col in self.ind_vars if col in _df_train.columns]
+    self.X_train = _df_train[ind_vars]
+    self.y_train = _df_train[self.dep_var]
 
     if _df_multi is not None:
-      dep_vars = [col for col in self.dep_vars if col in _df_multi.columns]
-      self.X_multiverse = _df_multi[dep_vars]
-      self.y_multiverse = _df_multi[self.ind_var]
+      ind_vars = [col for col in self.ind_vars if col in _df_multi.columns]
+      self.X_multiverse = _df_multi[ind_vars]
+      self.y_multiverse = _df_multi[self.dep_var]
     else:
       self.X_multiverse = None
       self.y_multiverse = None
@@ -561,9 +561,9 @@ class DataSplit:
       ):
         self.X_train.loc[:, col] = self.X_train[col].astype("float64")
 
-    dep_vars = [col for col in self.dep_vars if col in _df_test.columns]
-    self.X_test = _df_test[dep_vars]
-    self.y_test = _df_test[self.ind_var_test]
+    ind_vars = [col for col in self.ind_vars if col in _df_test.columns]
+    self.X_test = _df_test[ind_vars]
+    self.y_test = _df_test[self.dep_var_test]
 
 
 class SingleModelResults:
@@ -577,8 +577,8 @@ class SingleModelResults:
       df_sales (pd.DataFrame, optional): Sales DataFrame
       df_multiverse (pd.DataFrame, optional): Multiverse DataFrame
       type (str): Model type identifier
-      ind_var (str): Independent variable name
-      dep_vars (list[str]): Dependent variable names
+      dep_var (str): Independent variable name
+      ind_vars (list[str]): Dependent variable names
       model (PredictionModel): The model used for prediction
       pred_test (PredictionResults): Results for the test set
       pred_sales (PredictionResults, optional): Results for the sales set
@@ -652,18 +652,18 @@ class SingleModelResults:
       self.df_multiverse = None
 
     self.type = type
-    self.ind_var = ds.ind_var
-    self.ind_var_test = ds.ind_var_test
-    self.dep_vars = ds.dep_vars.copy()
+    self.dep_var = ds.dep_var
+    self.dep_var_test = ds.dep_var_test
+    self.ind_vars = ds.ind_vars.copy()
     self.model = model
 
     timing.start("stats_test")
-    self.pred_test = PredictionResults(self.ind_var_test, self.dep_vars, field_prediction, df_test)
+    self.pred_test = PredictionResults(self.dep_var_test, self.ind_vars, field_prediction, df_test)
     timing.stop("stats_test")
 
     timing.start("stats_sales")
     if y_pred_sales is not None:
-      self.pred_sales = PredictionResults(self.ind_var_test, self.dep_vars, field_prediction, df_sales)
+      self.pred_sales = PredictionResults(self.dep_var_test, self.ind_vars, field_prediction, df_sales)
     timing.stop("stats_sales")
 
     self.pred_univ = y_pred_univ
@@ -902,7 +902,7 @@ def predict_assessor(ds: DataSplit, assr_model: AssessorModel, timing: TimingDat
   """
   field = assr_model.field
   if ds.hedonic:
-    field = ds.dep_vars[0]
+    field = ds.ind_vars[0]
 
   # predict on test set:
   timing.start("predict_test")
@@ -970,7 +970,7 @@ def run_assessor(ds: DataSplit, verbose: bool = False):
   timing.start("train")
   timing.stop("train")
 
-  assr_model = AssessorModel(ds.dep_vars[0])
+  assr_model = AssessorModel(ds.ind_vars[0])
   return predict_assessor(ds, assr_model, timing, verbose)
 
 
@@ -1235,7 +1235,7 @@ def predict_gwr(ds: DataSplit, gwr_model: GWRModel, timing: TimingData, verbose:
     plot=True,
     intercept=intercept,
     gdf=ds.df_universe,
-    dep_vars=ds.dep_vars
+    ind_vars=ds.ind_vars
   ).flatten()
   timing.stop("predict_univ")
 
@@ -1736,14 +1736,14 @@ def predict_garbage(ds: DataSplit, garbage_model: GarbageModel, timing: TimingDa
   timing.stop("total")
 
   df = ds.df_universe
-  ind_var = ds.ind_var
+  dep_var = ds.dep_var
 
   if sales_chase:
     y_pred_test = ds.y_test * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_test))
     y_pred_sales = ds.y_sales * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_sales))
-    y_pred_univ = _sales_chase_univ(df, ind_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
+    y_pred_univ = _sales_chase_univ(df, dep_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
     if y_pred_multi is not None:
-      y_pred_multi = _sales_chase_univ(df, ind_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
+      y_pred_multi = _sales_chase_univ(df, dep_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
 
   name = "garbage"
   if normal:
@@ -1857,14 +1857,14 @@ def predict_average(ds: DataSplit, average_model: AverageModel, timing: TimingDa
   timing.stop("total")
 
   df = ds.df_universe
-  ind_var = ds.ind_var
+  dep_var = ds.dep_var
 
   if sales_chase:
     y_pred_test = ds.y_test * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_test))
     y_pred_sales = ds.y_sales * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_sales))
-    y_pred_univ = _sales_chase_univ(df, ind_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
+    y_pred_univ = _sales_chase_univ(df, dep_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
     if y_pred_multi is not None:
-      y_pred_multi = _sales_chase_univ(df, ind_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
+      y_pred_multi = _sales_chase_univ(df, dep_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
 
   name = "mean"
   if type == "median":
@@ -1996,14 +1996,14 @@ def predict_naive_sqft(ds: DataSplit, sqft_model: NaiveSqftModel, timing: Timing
   timing.stop("total")
 
   df = ds.df_universe
-  ind_var = ds.ind_var
+  dep_var = ds.dep_var
 
   if sales_chase:
     y_pred_test = ds.y_test * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_test))
     y_pred_sales = ds.y_sales * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_sales))
-    y_pred_univ = _sales_chase_univ(df, ind_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
+    y_pred_univ = _sales_chase_univ(df, dep_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
     if y_pred_multi is not None:
-      y_pred_multi = _sales_chase_univ(df, ind_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
+      y_pred_multi = _sales_chase_univ(df, dep_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
 
   name = "naive_sqft"
   if sales_chase:
@@ -2221,14 +2221,14 @@ def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Timing
   timing.stop("total")
 
   df = ds.df_universe
-  ind_var = ds.ind_var
+  dep_var = ds.dep_var
 
   if sales_chase:
     y_pred_test = ds.y_test * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_test))
     y_pred_sales = ds.y_sales * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_sales))
-    y_pred_univ = _sales_chase_univ(df, ind_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
+    y_pred_univ = _sales_chase_univ(df, dep_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
     if y_pred_multi is not None:
-      y_pred_multi = _sales_chase_univ(df, ind_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
+      y_pred_multi = _sales_chase_univ(df, dep_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
 
   if "ss_id" in location_fields:
     name = "local_smart_sqft"
@@ -2366,7 +2366,7 @@ def run_local_sqft(ds: DataSplit, location_fields: list[str], sales_chase: float
 
 # Private functions:
 
-def _sales_chase_univ(df_in, ind_var, y_pred_univ):
+def _sales_chase_univ(df_in, dep_var, y_pred_univ):
   """
   Simulate sales chasing behavior for universe predictions.
 
@@ -2375,16 +2375,16 @@ def _sales_chase_univ(df_in, ind_var, y_pred_univ):
 
   :param df_in: Input DataFrame.
   :type df_in: pandas.DataFrame
-  :param ind_var: Independent variable column name.
-  :type ind_var: str
+  :param dep_var: Independent variable column name.
+  :type dep_var: str
   :param y_pred_univ: Array of predictions for the universe.
   :type y_pred_univ: numpy.ndarray
   :returns: Adjusted predictions as a NumPy array.
   :rtype: numpy.ndarray
   """
-  df_univ = df_in[[ind_var]].copy()
+  df_univ = df_in[[dep_var]].copy()
   df_univ["prediction"] = y_pred_univ.copy()
-  df_univ.loc[df_univ[ind_var].gt(0), "prediction"] = df_univ[ind_var]
+  df_univ.loc[df_univ[dep_var].gt(0), "prediction"] = df_univ[dep_var]
   return df_univ["prediction"].to_numpy()
 
 
@@ -2471,7 +2471,7 @@ def _local_gwr_predict_external(model, point, predictors):
   return betas.reshape(-1), y_pred
 
 
-def _run_gwr_prediction(coords, coords_train, X, X_train, gwr_bw, y_train, plot: bool = False, gdf: gpd.GeoDataFrame = None, dep_vars: list[str] = None, intercept: bool = True):
+def _run_gwr_prediction(coords, coords_train, X, X_train, gwr_bw, y_train, plot: bool = False, gdf: gpd.GeoDataFrame = None, ind_vars: list[str] = None, intercept: bool = True):
   """
   Run GWR predictions for a set of points.
 
@@ -2493,8 +2493,8 @@ def _run_gwr_prediction(coords, coords_train, X, X_train, gwr_bw, y_train, plot:
   :type plot: bool, optional
   :param gdf: Optional GeoDataFrame for plotting.
   :type gdf: geopandas.GeoDataFrame, optional
-  :param dep_vars: List of dependent variable names.
-  :type dep_vars: list[str], optional
+  :param ind_vars: List of dependent variable names.
+  :type ind_vars: list[str], optional
   :param intercept: Whether an intercept is used.
   :type intercept: bool, optional
   :returns: Predicted values as a NumPy array.
@@ -2515,7 +2515,7 @@ def _run_gwr_prediction(coords, coords_train, X, X_train, gwr_bw, y_train, plot:
   # print(f"X shape = {X.shape}")
   # print(f"X type = {type(X)}")
   #
-  # print(f"dep_vars = {dep_vars}")
+  # print(f"ind_vars = {ind_vars}")
   # print(f"params shape = {params.shape}")
   #
   # var = ""
@@ -2528,17 +2528,17 @@ def _run_gwr_prediction(coords, coords_train, X, X_train, gwr_bw, y_train, plot:
   #     if i == 0:
   #       var = "Intercept"
   #     else:
-  #       var = dep_vars[i-1] if dep_vars is not None else f"Variable {i-1}"
+  #       var = ind_vars[i-1] if ind_vars is not None else f"Variable {i-1}"
   #
   #     plot_value_surface(f"Prediction contribution for {var}", contributions, x_coords, y_coords, gdf)
   #
   #   plot_value_surface("Prediction", y_pred, x_coords, y_coords, gdf)
   #
-  #   if dep_vars is not None and "land_area_sqft" in dep_vars:
+  #   if ind_vars is not None and "land_area_sqft" in ind_vars:
   #     # get the index of the land area sqft variable
-  #     land_size_index = dep_vars.index("land_area_sqft")
+  #     land_size_index = ind_vars.index("land_area_sqft")
   #
-  #     print(f"Divide {var} by {dep_vars[land_size_index]}")
+  #     print(f"Divide {var} by {ind_vars[land_size_index]}")
   #
   #     # we normalize this by dividing each contribution by the value of its corresponding variable value in X:
   #     #contributions = div_field_z_safe(contributions, X[:, land_size_index])

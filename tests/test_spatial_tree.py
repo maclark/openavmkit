@@ -36,11 +36,11 @@ def test_spatial_tree():
   #
   # df = df.to_crs(crs_equal_distance)
   # #df = get_vacant_sales(df, settings)
-  # ind_var = "sale_price_time_adj"
+  # dep_var = "sale_price_time_adj"
   # size_var = "land_area_sqft"
   #
   # df = df[
-  #   df[ind_var].gt(0) &
+  #   df[dep_var].gt(0) &
   #   df[size_var].gt(0)
   # ].reset_index(drop=True)
   #
@@ -63,7 +63,7 @@ def test_spatial_tree():
   # min_samples = 100
   # max_depth = 6
   #
-  # build_kdtree(df, root_node, ind_var, size_var, min_samples, max_depth)
+  # build_kdtree(df, root_node, dep_var, size_var, min_samples, max_depth)
   #
   # visualize_kdtree(root_node, 1000, 1000)
   # print("DONE")
