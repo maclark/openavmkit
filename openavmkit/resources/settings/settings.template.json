@@ -1,0 +1,252 @@
+{
+	"locality": {},
+	"data": {
+		"load": {},
+		"process": {
+			"merge": {},
+			"fill": {
+				"zero": [
+					"bldg_area_finished_sqft"
+				]
+			},
+			"reconcile": {},
+			"enrich": {}
+		}
+	},
+	"modeling": {
+		"metadata": {
+			"modeler": "Modeler"
+		},
+		"instructions": {
+			"time_adjustment": {},
+			"feature_selection": {
+				"thresholds": {
+					"correlation": 0.1,
+					"vif": 10,
+					"p_value": 0.05,
+					"t_value": 2,
+					"enr_coef": 0.01,
+					"adj_r2": 0.05
+				},
+				"weights": {
+					"vif": 3,
+					"p_value": 3,
+					"t_value": 2,
+					"enr_coef": 2,
+					"corr_score": 2,
+					"coef_sign": 2,
+					"adj_r2": 1
+				}
+			}
+		},
+		"models": {
+			"default": {
+				"dep_vars": [],
+				"interactions": {
+					"default": true
+				}
+			}
+		}
+	},
+	"analysis": {
+		"ratio_study": {
+			"look_back_years": 1,
+			"breakdowns": [
+				{"by": "sale_price", "quantiles": 10},
+				{"by": "bldg_area_finished_sqft", "quantiles": 10},
+				{"by": "bldg_age_years", "slice_size": 10},
+				{"by": "land_area_sqft", "quantiles":  10},
+				{"by": "bldg_quality_txt"},
+				{"by": "bldg_condition_txt"},
+				{"by": "<loc_neighborhood>"},
+				{"by": "<loc_market_area>"},
+				{"by": "<loc_region>"}
+			]
+		},
+		"sales_scrutiny": {
+			"location": "neighborhood",
+			"fields_categorical_improved": [],
+			"fields_numeric": []
+		},
+		"horizontal_equity": {
+			"location": "neighborhood",
+			"fields_categorical": [],
+			"fields_numeric": [
+				"land_area_sqft",
+				"bldg_area_finished_sqft",
+				"bldg_quality_num",
+				"bldg_condition_num",
+				"bldg_age_years"
+			]
+		},
+		"report": {
+			"formats": ["pdf", "html", "md"]
+		}
+	},
+	"field_classification": {
+		"land": {
+			"numeric": [
+				"noise_mean",
+				"noise_max",
+				"elevation_mean",
+				"elevation_stdev",
+				"slope_mean",
+				"slope_stdev",
+				"longitude_norm",
+				"latitude_norm",
+				"longitude",
+				"latitude",
+				"land_area_sqft",
+				"land_area_sqft2",
+				"land_area_sqft3",
+				"land_area_sqft_assessor",
+				"land_area_gis_sqft",
+				"land_area_gis_delta_sqft",
+				"land_area_gis_delta_percent",
+				"depth_ft",
+				"frontage_ft",
+				"median_income",
+				"rectangularity_num",
+				"osm_street_speed_limit",
+				"osm_street_lanes",
+				"assr_land_value",
+				"assr_land_value_land_sqft",
+				"predicted_land_value",
+				"predicted_land_value_per_land_sqft",
+				"dist_to_cbd",
+				"aspect_ratio",
+				"geom_vertices",
+				"is_geom_triangular",
+				"is_geom_complex",
+				"is_geom_elongated",
+				"is_geom_irregular",
+				"dist_to_colleges",
+				"dist_to_universities",
+				"dist_to_greenspace",
+				"dist_to_airport",
+				"land_area_median_sqft",
+				"land_area_delta_from_median_sqft"
+			],
+			"categorical": [
+				"land_class",
+				"rectangularity_txt",
+				"neighborhood",
+				"census_tract",
+				"census_block_group",
+				"city",
+				"school_district",
+				"zoning",
+				"zoning_class",
+				"zoning_desc",
+				"zoning_class_desc",
+				"zoning_category",
+				"osm_street_name",
+				"osm_street_type",
+				"osm_corner_lot_type",
+				"osm_corner_lot_street",
+				"osm_waterfront_name",
+				"osm_golf_course_name",
+				"osm_park_name",
+				"osm_playground_name",
+				"osm_swimming_pool_name"
+			],
+			"boolean": [
+				"is_triangular",
+				"is_complex_geometry",
+				"is_elongated",
+				"is_irregular",
+				"is_below_buildable_size",
+				"osm_is_corner_lot",
+				"osm_is_cul_de_sac",
+				"osm_is_waterfront",
+				"osm_on_golf_course",
+				"osm_on_park",
+				"osm_on_playground",
+				"osm_on_swimming_pool"
+			]
+		},
+		"impr": {
+			"boolean": [
+				"new_construction",
+				"newish_construction"
+			],
+			"numeric": [
+				"bldg_count",
+				"bldg_area_finished_sqft",
+				"bldg_quality_num",
+				"bldg_condition_num",
+				"bldg_age_years",
+				"bldg_effective_age_years",
+				"bldg_units",
+				"bldg_stories",
+				"bldg_year_built",
+				"bldg_effective_year_built",
+				"bldg_year_remodeled",
+				"bldg_rooms_bed",
+				"bldg_rooms_bath",
+				"bldg_rooms_bath_full",
+				"bldg_rooms_bath_half",
+				"bldg_area_footprint_sqft",
+				"assr_impr_value",
+				"assr_impr_value_impr_sqft"
+			],
+			"categorical": [
+				"bldg_fixtures",
+				"bldg_plumbing",
+				"bldg_class",
+				"bldg_desc",
+				"bldg_type",
+				"bldg_style",
+				"bldg_exterior",
+				"bldg_heating",
+				"bldg_ac",
+				"bldg_foundation",
+				"bldg_quality_txt",
+				"bldg_condition_txt"
+			]
+		},
+		"other": {
+			"numeric": [
+				"sale_age_days",
+				"sale_price",
+				"sale_price_land_sqft",
+				"sale_price_impr_sqft",
+				"assr_market_value",
+				"assr_market_value_land_sqft",
+				"assr_market_value_impr_sqft",
+				"assr_land_alloc",
+				"min_buildable_size",
+				"sale_year",
+				"sale_month",
+				"sale_day",
+				"floor_area_ratio"
+			],
+			"categorical": [
+				"he_id",
+				"model_group",
+				"warning_vacant_discrepancy",
+				"warning_vacant_positive_year_built",
+				"warning_vacant_positive_impr_numeric",
+				"warning_vacant_has_impr_categorical",
+				"sale_date"
+			],
+			"boolean": [
+				"is_vacant",
+				"valid_sale",
+				"vacant_sale",
+				"valid_for_ratio_study",
+				"valid_for_land_ratio_study",
+				"valid_for_modeling",
+				"potential_vacant_sale"
+			]
+		}
+	},
+	"ref": {
+		"__": "This section is where we store objects and values we'd like to include by reference elsewhere",
+		"dupes": {
+			"subset": ["key"],
+			"sort_by": ["key", "asc"],
+			"drop": true
+		}
+	}
+}

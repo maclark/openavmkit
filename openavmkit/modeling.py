@@ -1030,24 +1030,24 @@ def predict_kernel(ds: DataSplit, kr: KernelReg, timing: TimingData, verbose: bo
     print(f"--> predicting on test set...")
   # Predict at original locations:
   timing.start("predict_test")
-  y_pred_test, _ = kr.fit(X_test, verbose=verbose)
+  y_pred_test, _ = kr.fit(X_test)
   timing.stop("predict_test")
 
   if verbose:
     print(f"--> predicting on sales set...")
   timing.start("predict_sales")
-  y_pred_sales, _ = kr.fit(X_sales, verbose=verbose)
+  y_pred_sales, _ = kr.fit(X_sales)
   timing.stop("predict_sales")
 
   if verbose:
     print(f"--> predicting on universe set...")
   timing.start("predict_univ")
-  y_pred_univ, _ = kr.fit(X_univ, verbose=verbose)
+  y_pred_univ, _ = kr.fit(X_univ)
   timing.stop("predict_univ")
 
   timing.start("predict_multi")
   if ds.df_multiverse is not None:
-    y_pred_multi, _ = kr.fit(X_multi, verbose=verbose)
+    y_pred_multi, _ = kr.fit(X_multi)
   else:
     y_pred_multi = None
   timing.stop("predict_multi")

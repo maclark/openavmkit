@@ -35,7 +35,7 @@ def derive_prices(
 
   Returns:
     The entry and exit prices
-  """
+"""
 
   noi_mult = 1 + noi_growth
   irr_mult = 1 + target_irr

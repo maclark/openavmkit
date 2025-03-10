@@ -62,7 +62,7 @@ def make_clusters(
 
       # get the field to crunch
       field = _get_entry_field(entry, df_sub)
-      if field == "":
+      if field == "" or field not in df_sub:
         continue
 
       # attempt to crunch into smaller clusters

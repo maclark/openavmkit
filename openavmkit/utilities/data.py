@@ -163,6 +163,8 @@ def do_per_model_group(df_in: pd.DataFrame, settings: dict, func: callable, para
 		if df_sub_updated is not None:
 			# Ensure consistent data types between df and the updated subset.
 			for col in df_sub_updated.columns:
+				if col == "key":
+					continue
 				df = combine_dfs(df, df_sub_updated[["key", col]], df2_stomps=True)
 
 	return df

@@ -11,6 +11,7 @@ Rules:
 
 import os
 import pickle
+import warnings
 from typing import Any
 
 import numpy as np
@@ -84,18 +85,36 @@ def init_notebook(locality: str):
    if first_run:
       init_notebook.nbs = nbs
 
+      # Fix warnings too
+      oldformatwarning = warnings.formatwarning
 
-def load_settings():
+      # Customize warning format
+      def custom_formatwarning(msg, category, filename, lineno, line):
+         # if it's a user warning:
+         if issubclass(category, UserWarning):
+            return f"UserWarning: {msg}\n"
+         else:
+            return oldformatwarning(msg, category, filename, lineno, line)
+
+      warnings.formatwarning = custom_formatwarning
+
+
+def load_settings(settings_file: str = "in/settings.json", settings_object: dict = None):
    """
    Load and return the settings dictionary for the locality.
 
    This merges the user's settings for their specific locality with the default settings template and the default data dictionary.
    It also performs variable substitution. The result is a fully resolved settings dictionary.
 
+   :param settings_file: Path to the settings file.
+   :type settings_file: str, optional
+   :param settings_object: Optional settings object to use instead of loading from a file.
+   :type settings_object: dict, optional
+
    :returns: The settings dictionary.
    :rtype: dict
    """
-   return openavmkit.utilities.settings.load_settings()
+   return openavmkit.utilities.settings.load_settings(settings_file, settings_object)
 
 
 def examine_sup(sup: SalesUniversePair, s: dict):
@@ -519,7 +538,7 @@ def write_notebook_output_sup(sup: SalesUniversePair, prefix="1-assemble"):
    print(f"...out/look/{prefix}-sales.parquet")
 
 
-def cloud_sync(locality: str, verbose: bool = False, dry_run: bool = False):
+def cloud_sync(locality: str, verbose: bool = False, env_path: str = "", dry_run: bool = False):
    """
    Synchronize local files to the cloud storage.
 
@@ -533,7 +552,7 @@ def cloud_sync(locality: str, verbose: bool = False, dry_run: bool = False):
    :type dry_run: bool, optional
    :returns: None
    """
-   cloud_service = cloud.init(verbose)
+   cloud_service = cloud.init(verbose, env_path = env_path)
    if cloud_service is None:
       print("Cloud service not initialized, skipping...")
       return

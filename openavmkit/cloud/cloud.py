@@ -7,8 +7,8 @@ from openavmkit.cloud.huggingface import get_creds_from_env_huggingface, init_se
 from openavmkit.cloud.sftp import get_creds_from_env_sftp, init_service_sftp
 
 
-def init(verbose: bool) -> CloudService | None:
-  load_dotenv()
+def init(verbose: bool, env_path: str = "") -> CloudService | None:
+  load_dotenv(dotenv_path=env_path)
   cloud_type = os.getenv("CLOUD_TYPE")
   cloud_access = os.getenv("CLOUD_ACCESS")
   if verbose:

@@ -24,6 +24,11 @@
 		"type": "string",
 		"groups": ["location"]
 	},
+	"census_block": {
+		"name": "Census block",
+		"type": "string",
+		"groups": ["location"]
+	},
 	"census_block_group":{
 		"name": "Census block group",
 		"type": "string",
@@ -158,6 +163,24 @@
 		"type": "boolean",
 		"groups": ["land"]
 	},
+	"risk_flood": {
+		"name": "Flood risk",
+		"description": "Flood risk (FEMA food zone subtype)",
+		"type": "string",
+		"groups": ["location"]
+	},
+	"risk_disaster": {
+		"name": "Disaster risk",
+		"description": "Disaster risk (FEMA National Risk Index rating)",
+		"type": "string",
+		"groups": ["location"]
+	},
+	"is_opportunity_zone": {
+		"name": "Opportunity zone",
+		"description": "Whether the parcel is in a Federal Qualified Opportunity Zone",
+		"type": "boolean",
+		"groups": ["location"]
+	},
 	"dist_to_cbd":{
 		"name": "Distance to central business district",
 		"description": "Distance to the central business district",
@@ -190,9 +213,39 @@
 	},
 	"address":{
 		"name": "Address",
-		"description": "Street address of the parcel",
+		"description": "Street address of the parcel (situs location)",
 		"type": "string",
 		"groups": ["location"]
+	},
+	"is_usps_vacant": {
+		"name": "USPS vacancy indicator",
+		"description": "Whether the USPS has flagged the address as vacant (not as in vacant land, but as in not receiving mail, e.g., a likely vacant building, seasonal property, etc.)",
+		"type": "boolean",
+		"groups": ["mail"]
+	},
+	"mail_address":{
+		"name": "Mail address",
+		"description": "Mailing address where tax/assessment info is sent",
+		"type": "string",
+		"groups": ["mail"]
+	},
+	"mail_city": {
+		"name": "Mail city",
+		"description": "Mailing address city",
+		"type": "string",
+		"groups": ["mail"]
+	},
+	"mail_state": {
+		"name": "Mail state",
+		"description": "Mailing address state",
+		"type": "string",
+		"groups": ["mail"]
+	},
+	"mail_zip": {
+		"name": "Mail ZIP code",
+		"description": "Mailing address ZIP code",
+		"type": "string",
+		"groups": ["mail"]
 	},
 	"land_class":{
 		"name": "Land class",
@@ -215,6 +268,12 @@
 	"neighborhood":{
 		"name": "Neighborhood",
 		"description": "Neighborhood",
+		"type": "string",
+		"groups": ["location"]
+	},
+	"block": {
+		"name": "Block",
+		"description": "Block",
 		"type": "string",
 		"groups": ["location"]
 	},

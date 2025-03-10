@@ -1,17 +1,20 @@
+import importlib
 import json
 import os
 
 import pandas as pd
 from datetime import datetime
 
-def load_settings(settings_file: str = "in/settings.json"):
-  # this assumes you've set your root directory already
-  try:
-    with open(settings_file, "r") as f:
-      settings = json.load(f)
-  except FileNotFoundError:
-    cwd = os.getcwd()
-    raise FileNotFoundError(f"Could not find settings file: {settings_file}. Go to '{cwd}' and create a settings.json file there!")
+def load_settings(settings_file: str = "in/settings.json", settings_object: dict = None):
+  if settings_object is None:
+    try:
+      with open(settings_file, "r") as f:
+        settings = json.load(f)
+    except FileNotFoundError:
+      cwd = os.getcwd()
+      raise FileNotFoundError(f"Could not find settings file: {settings_file}. Go to '{cwd}' and create a settings.json file there!")
+  else:
+    settings = settings_object
 
   template = _load_settings_template()
   # merge settings with template; settings will overwrite template values
@@ -396,17 +399,15 @@ def _lookup_variable_in_settings(s: dict, var_name: str, path: list[str] = None)
   return None
 
 
-
 def _load_data_dictionary_template():
-  with open("../data_dictionary.json", "r") as f:
-    data_dictionary = json.load(f)
+  with importlib.resources.open_text("openavmkit.resources.settings", f"data_dictionary.json", encoding="utf-8") as file:
+    data_dictionary = json.load(file)
   return data_dictionary
 
 
 def _load_settings_template():
-  # this assumes you've set your root directory already
-  with open("../settings.template.json", "r") as f:
-    settings = json.load(f)
+  with importlib.resources.open_text("openavmkit.resources.settings", f"settings.template.json", encoding="utf-8") as file:
+    settings = json.load(file)
   return settings
 
 
