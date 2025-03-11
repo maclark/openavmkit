@@ -1,8 +1,10 @@
 import math
+from shapely.geometry import box
 from datetime import datetime as dt
 
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 
 from openavmkit.income import derive_prices
 from openavmkit.projection import project_trend
@@ -10,17 +12,16 @@ from openavmkit.time_adjustment import _generate_days
 
 
 class SyntheticData:
-	df: pd.DataFrame
-	time_land_mult: pd.DataFrame
-	time_bldg_mult: pd.DataFrame
 
 	def __init__(
 			self,
-			df: pd.DataFrame,
+			df_universe: pd.DataFrame,
+			df_sales: pd.DataFrame,
 			time_land_mult: pd.DataFrame,
 			time_bldg_mult: pd.DataFrame
 	):
-		self.df = df
+		self.df_universe = df_universe
+		self.df_sales = df_sales
 		self.time_land_mult = time_land_mult
 		self.time_bldg_mult = time_bldg_mult
 
@@ -133,6 +134,17 @@ def generate_inflation_curve(
 	return time_mult_days
 
 
+def create_square(x: float, y: float, width: float, height: float):
+	half_width = width/2
+	half_height = height/2
+	# Determine the bounds for the square
+	minx = x - half_width
+	maxx = x + half_width
+	miny = y - half_height
+	maxy = y + half_height
+	return box(minx, miny, maxx, maxy)
+
+
 def generate_basic(
 		size: int,
 		percent_sales: float = 0.1,
@@ -143,6 +155,7 @@ def generate_basic(
 ):
 	data = {
 		"key": [],
+		"geometry": [],
 		"neighborhood": [],
 		"bldg_area_finished_sqft": [],
 		"land_area_sqft": [],
@@ -154,12 +167,17 @@ def generate_basic(
 		"bldg_value": [],
 		"total_value": [],
 		"dist_to_cbd": [],
+		"latitude": [],
+		"longitude": []
+	}
+
+	data_sales = {
+		"key": [],
 		"valid_sale": [],
+		"vacant_sale": [],
 		"sale_price": [],
 		"sale_price_per_impr_sqft": [],
 		"sale_price_per_land_sqft": [],
-		"latitude": [],
-		"longitude": [],
 		"sale_age_days": [],
 		"sale_date": [],
 		"sale_year": [],
@@ -241,6 +259,7 @@ def generate_basic(
 			dist_center = (dist_x**2 + dist_y**2)**0.5
 
 			valid_sale = False
+			vacant_sale = False
 			# roll for a sale:
 			if np.random.rand() < percent_sales:
 				valid_sale = True
@@ -320,6 +339,10 @@ def generate_basic(
 				sale_year_month = f"{sale_year:04}-{sale_month:02}"
 				sale_year_quarter = f"{sale_year:04}Q{sale_quarter}"
 
+				vacant_sale = bldg_area_finished_sqft <= 0
+
+			geometry = create_square(longitude, latitude, height, width)
+
 			data["key"].append(str(key))
 			data["neighborhood"].append("")
 			data["bldg_area_finished_sqft"].append(bldg_area_finished_sqft)
@@ -334,19 +357,24 @@ def generate_basic(
 			data["dist_to_cbd"].append(dist_center)
 			data["latitude"].append(latitude)
 			data["longitude"].append(longitude)
-			data["valid_sale"].append(valid_sale)
-			data["sale_price"].append(sale_price)
-			data["sale_price_per_impr_sqft"].append(sale_price_per_impr_sqft)
-			data["sale_price_per_land_sqft"].append(sale_price_per_land_sqft)
-			data["sale_age_days"].append(sale_age_days)
-			data["sale_date"].append(sale_date)
-			data["sale_year"].append(sale_year)
-			data["sale_month"].append(sale_month)
-			data["sale_quarter"].append(sale_quarter)
-			data["sale_year_month"].append(sale_year_month)
-			data["sale_year_quarter"].append(sale_year_quarter)
+			data["geometry"].append(geometry)
 
-	df = pd.DataFrame(data)
+			data_sales["key"].append(str(key))
+			data_sales["valid_sale"].append(valid_sale)
+			data_sales["vacant_sale"].append(vacant_sale)
+			data_sales["sale_price"].append(sale_price)
+			data_sales["sale_price_per_impr_sqft"].append(sale_price_per_impr_sqft)
+			data_sales["sale_price_per_land_sqft"].append(sale_price_per_land_sqft)
+			data_sales["sale_age_days"].append(sale_age_days)
+			data_sales["sale_date"].append(sale_date)
+			data_sales["sale_year"].append(sale_year)
+			data_sales["sale_month"].append(sale_month)
+			data_sales["sale_quarter"].append(sale_quarter)
+			data_sales["sale_year_month"].append(sale_year_month)
+			data_sales["sale_year_quarter"].append(sale_year_quarter)
+
+	df = gpd.GeoDataFrame(data, geometry='geometry')
+	df_sales = pd.DataFrame(data_sales)
 
 	# Derive neighborhood:
 	distance_quantiles = [0.0, 0.25, 0.75, 1.0]
@@ -368,7 +396,7 @@ def generate_basic(
 
 	df["neighborhood"] = df["neighborhood"].astype(str) + "_" + df["quadrant"].astype(str)
 
-	sd = SyntheticData(df, df_time_land_mult, df_time_bldg_mult)
+	sd = SyntheticData(df, df_sales, df_time_land_mult, df_time_bldg_mult)
 	return sd
 
 
