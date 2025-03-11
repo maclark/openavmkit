@@ -8,7 +8,7 @@ from optuna import Trial
 from sklearn.model_selection import KFold
 from sklearn.metrics import mean_absolute_error
 
-def tune_xgboost(X, y, n_trials=100, n_splits=5, random_state=42, verbose=False):
+def tune_xgboost(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False):
     """
     Tunes XGBoost hyperparameters using Optuna and rolling-origin cross-validation.
     Uses the xgboost.train API for training. Includes logging for progress monitoring.
@@ -52,7 +52,7 @@ def tune_xgboost(X, y, n_trials=100, n_splits=5, random_state=42, verbose=False)
     return study.best_params
 
 
-def tune_lightgbm(X, y, n_trials=100, n_splits=5, random_state=42, verbose=False):
+def tune_lightgbm(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False):
     """
     Tunes LightGBM hyperparameters using Optuna and rolling-origin cross-validation.
 
@@ -108,7 +108,7 @@ def tune_lightgbm(X, y, n_trials=100, n_splits=5, random_state=42, verbose=False
     return study.best_params
 
 
-def tune_catboost(X, y, n_trials=100, n_splits=5, random_state=42, verbose=False):
+def tune_catboost(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False):
     """
     Tunes CatBoost hyperparameters using Optuna and rolling-origin cross-validation.
 
@@ -147,7 +147,7 @@ def tune_catboost(X, y, n_trials=100, n_splits=5, random_state=42, verbose=False
             params["max_leaves"] = trial.suggest_int("max_leaves", 31, 128)
 
         # Perform rolling-origin cross-validation
-        mae = _catboost_rolling_origin_cv(X, y, params, n_splits=n_splits, random_state=random_state)
+        mae = _catboost_rolling_origin_cv(X, y, params, n_splits=n_splits, random_state=random_state, cat_vars=cat_vars)
         if verbose:
             print(f"-->trial # {trial.number}/{n_trials}, MAE: {mae:10.0f}, params: {params}")
         return mae  # Optuna minimizes, so return the MAE directly
@@ -216,7 +216,7 @@ def _xgb_rolling_origin_cv(X, y, params, num_boost_round, n_splits=5, random_sta
     return mean_mae
 
 
-def _catboost_rolling_origin_cv(X, y, params, n_splits=5, random_state=42, verbose=False):
+def _catboost_rolling_origin_cv(X, y, params, n_splits=5, random_state=42, cat_vars=None, verbose=False):
     """
     Performs rolling-origin cross-validation for CatBoost model evaluation.
 
@@ -226,6 +226,7 @@ def _catboost_rolling_origin_cv(X, y, params, n_splits=5, random_state=42, verbo
         params (dict): CatBoost hyperparameters.
         n_splits (int): Number of folds for cross-validation. Default is 5.
         random_state (int): Random seed for reproducibility. Default is 42.
+        cat_vars (list): List of categorical variables. Default is None.
         verbose (bool): Whether to print CatBoost training logs.
 
     Returns:
@@ -243,8 +244,10 @@ def _catboost_rolling_origin_cv(X, y, params, n_splits=5, random_state=42, verbo
             X_train, X_val = X[train_idx], X[val_idx]
             y_train, y_val = y[train_idx], y[val_idx]
 
-        train_pool = Pool(X_train, y_train)
-        val_pool = Pool(X_val, y_val)
+        _cat_vars_train = [var for var in cat_vars if var in X_train.columns.values]
+        _cat_vars_val = [var for var in cat_vars if var in X_val.columns.values]
+        train_pool = Pool(X_train, y_train, cat_features=_cat_vars_train)
+        val_pool = Pool(X_val, y_val, cat_features=_cat_vars_val)
 
         # Train CatBoost
         model = CatBoostRegressor(**params)

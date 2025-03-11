@@ -378,6 +378,7 @@ class DataSplit:
 
     for col in ds.categorical_vars:
       ds.df_universe[col] = ds.df_universe[col].astype("category")
+      ds.df_multiverse[col] = ds.df_multiverse[col].astype("category")
       ds.df_sales[col] = ds.df_sales[col].astype("category")
 
     return ds
@@ -473,13 +474,12 @@ class DataSplit:
     If the model is hedonic, further filters the sales set to vacant records.
     """
     test_keys = self.test_keys
-    train_keys = self.train_keys
 
     # separate df into train & test:
 
     # select the rows that are in the test_keys:
-    self.df_test = self._df_sales[self._df_sales["key"].astype(str).isin(test_keys)].reset_index(drop=True)
-    self.df_train = self._df_sales.drop(self.df_test.index)
+    self.df_test = self.df_sales[self.df_sales["key"].astype(str).isin(test_keys)].reset_index(drop=True)
+    self.df_train = self.df_sales.drop(self.df_test.index)
 
     self.df_test = self.df_test.reset_index(drop=True)
     self.df_train = self.df_train.reset_index(drop=True)
@@ -2595,7 +2595,7 @@ def _get_params(name: str, slug: str, ds: DataSplit, tune_func, outpath: str, sa
       if verbose:
         print(f"--> using saved parameters: {params}")
   if params is None:
-    params = tune_func(ds.X_train, ds.y_train, verbose=verbose, **kwargs)
+    params = tune_func(ds.X_train, ds.y_train, verbose=verbose, cat_vars=ds.categorical_vars, **kwargs)
     if verbose:
       print(f"--> optimal parameters = {params}")
     if save_params:
