@@ -263,10 +263,10 @@ def get_vacant(df_in: pd.DataFrame, settings: dict, invert: bool = False) -> pd.
 
 def get_sales(df_in: pd.DataFrame, settings: dict, vacant_only: bool = False) -> pd.DataFrame:
 	"""
-  Retrieve valid sales from the input DataFrame.
+  Retrieve valid sales from the input DataFrame. Also simulates removed buildings if applicable.
 
   Filters for sales with a positive sale price, valid_sale marked True.
-  If vacant_only is True, only includes rows where vacant_sale is True. Also simulates removed buildings if applicable.
+  If vacant_only is True, only includes rows where vacant_sale is True.
 
   :param df_in: Input DataFrame containing sales.
   :type df_in: pandas.DataFrame
@@ -289,15 +289,24 @@ def get_sales(df_in: pd.DataFrame, settings: dict, vacant_only: bool = False) ->
 			raise ValueError(f"The 'vacant_sale' column must be a boolean type (found: {vacant_sale_dtype})")
 		# check for vacant sales:
 		idx_vacant_sale = df["vacant_sale"].eq(True)
+
+		# simulate removed buildings for vacant sales
+		# (if we KNOW it was a vacant sale, then the building characteristics have to go)
 		df = simulate_removed_buildings(df, settings, idx_vacant_sale)
 		# if a property was NOT vacant at time of sale, but is vacant now, then the sale is invalid:
-		df.loc[~idx_vacant_sale & df["is_vacant"].eq(True), "valid_sale"] = False
+		idx_is_vacant = df["is_vacant"].eq(True)
+		df.loc[~idx_vacant_sale & idx_is_vacant, "valid_sale"] = False
+	idx_sale_price = df["sale_price"].gt(0)
+	idx_valid_sale = df["valid_sale"].eq(True)
+	idx_is_vacant = df["vacant_sale"].eq(True)
+	idx_all = idx_sale_price & idx_valid_sale & (idx_is_vacant if vacant_only else True)
+
 
 	df_sales: pd.DataFrame = df[
 		df["sale_price"].gt(0) &
 		df["valid_sale"].eq(True) &
 		(df["vacant_sale"].eq(True) if vacant_only else True)
-		].copy()
+	].copy()
 
 	return df_sales
 
@@ -1196,7 +1205,7 @@ def _perform_ref_tables(df_in: pd.DataFrame | gpd.GeoDataFrame, s_ref: list | di
 	return df
 
 
-def _get_calc_cols(settings: dict) -> list[str]:
+def _get_calc_cols(settings: dict, exclude_loaded_fields: bool = False) -> list[str]:
 	"""
   Retrieve a list of calculated columns based on settings.
 
@@ -1206,13 +1215,19 @@ def _get_calc_cols(settings: dict) -> list[str]:
   :rtype: list[str]
   """
 	s_load = settings.get("data", {}).get("load", {})
-	cols_to_load = []
+	cols_found = []
+	cols_base = []
 	for key in s_load:
 		entry = s_load[key]
 		cols = _do_get_calc_cols(entry)
-		cols_to_load += cols
-	cols_to_load = list(set(cols_to_load))
-	return cols_to_load
+		cols_found += cols
+		if exclude_loaded_fields:
+			entry_load = entry.get("load", {})
+			for load_key in entry_load:
+				cols_base.append(load_key)
+
+	cols_found = list(set(cols_found)-set(cols_base))
+	return cols_found
 
 
 def _do_get_calc_cols(df_entry: dict) -> list[str]:
@@ -1446,6 +1461,7 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 	merges = []
 	s_reconcile = settings.get("data", {}).get("process", {}).get("reconcile", {})
 
+	# Generate instructions for merging, but don't merge just yet
 	for entry in merge_list:
 		df_id = None
 		how = "left"
@@ -1472,6 +1488,8 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 	df_merged: pd.DataFrame | None = None
 	all_cols = []
 	conflicts = {}
+
+	# Generate suffixes and note conflicts, which we'll resolve further down
 	for merge in merges:
 		df = merge["df"]
 		on = merge["on"]
@@ -1489,6 +1507,8 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 				conflicts[col].append(suffixed)
 		df = df.rename(columns=suffixes)
 		merge["df"] = df
+
+	# Perform the actual merges
 	for merge in merges:
 		_id = merge["id"]
 		df = merge.get("df", None)
@@ -1498,6 +1518,8 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 			df_merged = df
 		else:
 			df_merged = pd.merge(df_merged, df, how=how, on=on, suffixes=("", f"_{_id}"))
+
+	# Reconcile conflicts
 	for base_field in s_reconcile:
 		df_ids = s_reconcile[base_field]
 		if base_field not in all_cols:
@@ -1518,10 +1540,14 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 			for i in range(1, len(child_fields)):
 				df_merged[base_field] = df_merged[base_field].fillna(df_merged[child_fields[i]])
 			df_merged = df_merged.drop(columns=child_fields)
-	calc_cols = _get_calc_cols(settings)
+
+	# Remove columns used as INGREDIENTS in calculations, but which the user never intends to load directly
+	calc_cols = _get_calc_cols(settings, exclude_loaded_fields=True)
 	for col in df_merged.columns.values:
 		if col in calc_cols:
 			df_merged = df_merged.drop(columns=[col])
+
+	# Final checks
 	if "key" not in df_merged:
 		raise ValueError("No 'key' field found in merged dataframe. This field is required.")
 	len_old = len(df_merged)

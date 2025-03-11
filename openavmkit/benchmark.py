@@ -569,6 +569,9 @@ def _predict_one_model(
 	elif model_name == "assessor":
 		assr_model: AssessorModel = smr.model
 		results = predict_assessor(ds, assr_model, timing, verbose)
+	elif model_name == "ground_truth":
+		assr_model: AssessorModel = smr.model
+		results = predict_assessor(ds, assr_model, timing, verbose)
 	elif model_name == "mra":
 		# MRA is a special case where we have to call run_ instead of predict_, because there's delicate state mangling.
 		# We pass the pretrained `model` object to run_mra() to get it to skip training and move straight to prediction
@@ -655,13 +658,15 @@ def _get_data_split_for(
   :rtype: DataSplit
   """
 	if name == "local_naive_sqft":
-		_dep_vars = location_fields + ["bldg_area_finished_sqft", "land_area_sqft"]
+		_ind_vars = location_fields + ["bldg_area_finished_sqft", "land_area_sqft"]
 	elif name == "local_smart_sqft":
-		_dep_vars = ["ss_id"] + location_fields + ["bldg_area_finished_sqft", "land_area_sqft"]
+		_ind_vars = ["ss_id"] + location_fields + ["bldg_area_finished_sqft", "land_area_sqft"]
 	elif name == "assessor":
-		_dep_vars = ["assr_land_value"] if hedonic else ["assr_market_value"]
+		_ind_vars = ["assr_land_value"] if hedonic else ["assr_market_value"]
+	elif name == "ground_truth":
+		_ind_vars = ["true_land_value"] if hedonic else ["true_market_value"]
 	else:
-		_dep_vars = ind_vars
+		_ind_vars = ind_vars
 
 	return DataSplit(
 		df_sales,
@@ -670,7 +675,7 @@ def _get_data_split_for(
 		settings,
 		dep_var,
 		dep_var_test,
-		_dep_vars,
+		_ind_vars,
 		fields_cat,
 		interactions,
 		test_keys,
@@ -822,6 +827,8 @@ def _run_one_model(
 		results = run_local_sqft(ds, location_fields=["ss_id"] + location_fields, sales_chase=sales_chase, verbose=verbose)
 	elif model_name == "assessor":
 		results = run_assessor(ds, verbose=verbose)
+	elif model_name == "ground_truth":
+		results = run_assessor(ds, verbose=verbose)
 	elif model_name == "mra":
 		results = run_mra(ds, intercept=intercept, verbose=verbose)
 	elif model_name == "kernel":
@@ -857,8 +864,10 @@ def _assemble_model_results(results: SingleModelResults, settings: dict):
   :rtype: dict
   """
 	locations = get_report_locations(settings)
-	fields = ["key", "geometry", "prediction", "assr_market_value", "assr_market_land_value", "sale_price",
-						"sale_price_time_adj", "sale_date"] + locations
+	fields = ["key", "geometry", "prediction",
+						"assr_market_value", "assr_land_value",
+						"true_market_value", "true_land_value",
+						"sale_price", "sale_price_time_adj", "sale_date"] + locations
 	fields = [field for field in fields if field in results.df_sales.columns]
 
 	dfs = {
@@ -873,7 +882,13 @@ def _assemble_model_results(results: SingleModelResults, settings: dict):
 	for key in dfs:
 		df = dfs[key]
 		df["prediction_ratio"] = div_z_safe(df, "prediction", "sale_price_time_adj")
-		df["assr_ratio"] = div_z_safe(df, "assr_market_value", "sale_price_time_adj")
+		if "assr_market_value" in df:
+			df["assr_ratio"] = div_z_safe(df, "assr_market_value", "sale_price_time_adj")
+		else:
+			df["assr_ratio"] = None
+		if "true_market_value" in df:
+			df["true_vs_sale_ratio"] = div_z_safe(df, "true_market_value", "sale_price_time_adj")
+			df["pred_vs_true_ratio"] = div_z_safe(df, "prediction", "true_market_value")
 		for location in locations:
 			if location in df:
 				df[f"prediction_cod_{location}"] = None
@@ -884,9 +899,19 @@ def _assemble_model_results(results: SingleModelResults, settings: dict):
 					predictions = predictions[~pd.isna(predictions)]
 					df.loc[df[location].eq(value), f"prediction_cod_{location}"] = calc_cod(predictions)
 
-					assr_predictions = df.loc[df[location].eq(value), "assr_ratio"].values
-					assr_predictions = assr_predictions[~pd.isna(assr_predictions)]
-					df.loc[df[location].eq(value), f"assr_cod_{location}"] = calc_cod(assr_predictions)
+					if "assr_market_value" in df:
+						assr_ratios = df.loc[df[location].eq(value), "assr_ratio"].values
+						assr_ratios = assr_ratios[~pd.isna(assr_ratios)]
+						df.loc[df[location].eq(value), f"assr_cod_{location}"] = calc_cod(assr_ratios)
+					if "true_market_value" in df:
+						true_vs_sales_ratios = df.loc[df[location].eq(value), "true_vs_sale_ratio"].values
+						true_vs_sales_ratios = true_vs_sales_ratios[~pd.isna(true_vs_sales_ratios)]
+						df.loc[df[location].eq(value), f"true_vs_sale_cod_{location}"] = calc_cod(true_vs_sales_ratios)
+
+						pred_vs_true_ratios = df.loc[df[location].eq(value), "pred_vs_true_ratio"].values
+						pred_vs_true_ratios = pred_vs_true_ratios[~pd.isna(pred_vs_true_ratios)]
+						df.loc[df[location].eq(value), f"pred_vs_true_cod_{location}"] = calc_cod(pred_vs_true_ratios)
+
 	return dfs
 
 
@@ -910,7 +935,8 @@ def _write_model_results(results: SingleModelResults, outpath: str, settings: di
 	for key in dfs:
 		df = dfs[key]
 		df.to_parquet(f"{path}/pred_{key}.parquet")
-		df = df.drop(columns=["geometry"])
+		if "geometry" in df:
+			df = df.drop(columns=["geometry"])
 		df.to_csv(f"{path}/pred_{key}.csv", index=False)
 
 
@@ -1029,6 +1055,9 @@ def _optimize_ensemble_allocation(
 
 	if "assessor" in ensemble_list:
 		ensemble_list.remove("assessor")
+
+	if "ground_truth" in ensemble_list:
+		ensemble_list.remove("ground_truth")
 
 	best_list = []
 	best_score = float('inf')
@@ -1234,6 +1263,9 @@ def _optimize_ensemble(
 
 	if "assessor" in ensemble_list:
 		ensemble_list.remove("assessor")
+
+	if "ground_truth" in ensemble_list:
+		ensemble_list.remove("ground_truth")
 
 	best_list = []
 	best_score = float('inf')

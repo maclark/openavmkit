@@ -315,6 +315,44 @@
 	},
 	"assr_market_value_impr_sqft":{},
 	"assr_impr_value_impr_sqft":{},
+	"true_land_value":{
+		"name": "True land value",
+		"description": "Ground truth land value (only defined for synthetic data models)",
+		"type": "number",
+		"groups": ["valuation"]
+	},
+	"true_impr_value":{
+		"name": "True improvement value",
+		"description": "Ground truth improvement value (only defined for synthetic data models)",
+		"type": "number",
+		"groups": ["valuation"]
+	},
+	"true_market_value":{
+		"name": "True market value",
+		"description": "Ground truth market value (only defined for synthetic data models)",
+		"type": "number",
+		"groups": ["valuation"]
+	},
+	"true_land_alloc":{
+		"name": "True land allocation",
+		"description": "Ground truth % of the total value of the parcel is due to the land value alone (only defined for synthetic data models)",
+		"type": "percent",
+		"groups": ["valuation"]
+	},
+	"true_market_value_land_sqft":{
+		"name": "True market value per land square foot",
+		"description": "True market value, divided by the size of the parcel (only defined for synthetic data models)",
+		"type": "number",
+		"groups": ["valuation"]
+	},
+	"true_land_value_land_sqft":{
+		"name": "True land value per land square foot",
+		"description": "True land value, divided by the size of the parcel (only defined for synthetic data models)  ",
+		"type": "number",
+		"groups": ["valuation"]
+	},
+	"true_market_value_impr_sqft":{},
+	"true_impr_value_impr_sqft":{},
 	"bldg_desc":{
 		"name": "Building description",
 		"description": "Building description",

@@ -305,11 +305,19 @@ def _fill_unknown_values(df, settings: dict):
 	valuation_date = get_valuation_date(settings)
 	valuation_year = valuation_date.year
 
-	if "bldg_age_years" in df:
-		df["bldg_age_years"] = valuation_year - df["bldg_year_built"]
+	# Ensure year built and age in years are consistent
+	# If year built exists, derive age in years from that
+	# If year built doesn't exist, but age in years does, derive year built from that
 
-	if "bldg_effective_age_years" in df:
+	if "bldg_year_built" in df:
+		df["bldg_age_years"] = valuation_year - df["bldg_year_built"]
+	elif "bldg_age_years" in df:
+		df["bldg_year_built"] = valuation_year - df["bldg_age_years"]
+
+	if "bldg_effective_year_built" in df:
 		df["bldg_effective_age_years"] = valuation_year - df["bldg_effective_year_built"]
+	elif "bldg_effective_age_years" in df:
+		df["bldg_effective_year_built"] = valuation_year - df["bldg_effective_age_years"]
 
 	#remaining fields get auto-filled
 

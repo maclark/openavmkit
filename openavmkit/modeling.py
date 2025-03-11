@@ -794,23 +794,31 @@ def predict_mra(ds: DataSplit, model: MRAModel, timing: TimingData, verbose: boo
   """
   fitted_model: RegressionResults = model.fitted_model
 
+  print("PREDICT MRA!")
+
   # predict on test set:
   timing.start("predict_test")
+  print("test")
+  print(f"test cols = {ds.X_test.columns}")
   y_pred_test = safe_predict(fitted_model.predict, ds.X_test).to_numpy()
   timing.stop("predict_test")
 
   # predict on the sales set:
   timing.start("predict_sales")
+  print("sales")
+  print(f"sales cols = {ds.X_sales.columns}")
   y_pred_sales = safe_predict(fitted_model.predict, ds.X_sales).to_numpy()
   timing.stop("predict_sales")
 
   # predict on the universe set:
   timing.start("predict_univ")
+  print("univ")
   y_pred_univ = safe_predict(fitted_model.predict, ds.X_univ).to_numpy()
   timing.stop("predict_univ")
 
   timing.start("predict_multi")
   if ds.df_multiverse is not None:
+    print("multi")
     y_pred_multi = safe_predict(fitted_model.predict, ds.X_multiverse).to_numpy()
   else:
     y_pred_multi = None
@@ -901,6 +909,12 @@ def predict_assessor(ds: DataSplit, assr_model: AssessorModel, timing: TimingDat
   :rtype: SingleModelResults
   """
   field = assr_model.field
+
+  # TODO: genericize this to take any field name and label
+  model_name = "assessor"
+  if "truth" in field:
+    model_name = "ground_truth"
+
   if ds.hedonic:
     field = ds.ind_vars[0]
 
@@ -932,7 +946,7 @@ def predict_assessor(ds: DataSplit, assr_model: AssessorModel, timing: TimingDat
     ds,
     "prediction",
     "he_id",
-    "assessor",
+    model_name,
     assr_model,
     y_pred_test,
     y_pred_sales,

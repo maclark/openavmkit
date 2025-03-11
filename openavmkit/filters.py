@@ -100,8 +100,13 @@ def resolve_filter(df: pd.DataFrame, f: list) -> pd.Series:
     if operator == "isempty": return pd.isna(df[field]) | df[field].astype(str).str.strip().eq("")
     if operator == "iszero": return df[field].eq(0)
     if operator == "contains":
-      selection = df[field].str.contains(value[0])
-      for v in value[1:]: selection |= df[field].str.contains(v)
+      if isinstance(value, str):
+        selection = df[field].str.contains(value)
+      elif isinstance(value, list):
+        selection = df[field].str.contains(value[0])
+        for v in value[1:]: selection |= df[field].str.contains(v)
+      else:
+        raise ValueError(f"Value must be a string or list for operator {operator}, found: {type(value)}")
       return selection
 
   raise ValueError(f"Unknown operator {operator}")

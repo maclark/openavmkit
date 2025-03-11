@@ -111,6 +111,8 @@
 				"osm_street_lanes",
 				"assr_land_value",
 				"assr_land_value_land_sqft",
+				"true_land_value",
+				"true_land_value_land_sqft",
 				"predicted_land_value",
 				"predicted_land_value_per_land_sqft",
 				"dist_to_cbd",
@@ -188,7 +190,9 @@
 				"bldg_rooms_bath_half",
 				"bldg_area_footprint_sqft",
 				"assr_impr_value",
-				"assr_impr_value_impr_sqft"
+				"assr_impr_value_impr_sqft",
+				"true_impr_value",
+				"true_impr_value_impr_sqft"
 			],
 			"categorical": [
 				"bldg_fixtures",
@@ -215,6 +219,10 @@
 				"assr_market_value_land_sqft",
 				"assr_market_value_impr_sqft",
 				"assr_land_alloc",
+				"true_market_value",
+				"true_market_value_land_sqft",
+				"true_market_value_impr_sqft",
+				"true_land_alloc",
 				"min_buildable_size",
 				"sale_year",
 				"sale_month",
