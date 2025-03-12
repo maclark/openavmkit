@@ -538,7 +538,7 @@ def write_notebook_output_sup(sup: SalesUniversePair, prefix="1-assemble"):
    print(f"...out/look/{prefix}-sales.parquet")
 
 
-def cloud_sync(locality: str, verbose: bool = False, env_path: str = "", dry_run: bool = False):
+def cloud_sync(locality: str, verbose: bool = False, env_path: str = "", settings: dict = None, dry_run: bool = False):
    """
    Synchronize local files to the cloud storage.
 
@@ -552,7 +552,7 @@ def cloud_sync(locality: str, verbose: bool = False, env_path: str = "", dry_run
    :type dry_run: bool, optional
    :returns: None
    """
-   cloud_service = cloud.init(verbose, env_path = env_path)
+   cloud_service = cloud.init(verbose, env_path = env_path, settings = settings)
    if cloud_service is None:
       print("Cloud service not initialized, skipping...")
       return

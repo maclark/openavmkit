@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import requests
 from huggingface_hub import hf_hub_url, upload_file as hf_upload_file
 from huggingface_hub.hf_api import HfApi, RepoFolder
+from huggingface_hub.errors import EntryNotFoundError
 from openavmkit.cloud.base import CloudCredentials, CloudService, CloudFile, CloudAccess
 
 
@@ -40,20 +41,31 @@ class HuggingFaceService(CloudService):
       expand=True
     )
 
+    remote_empty = False
     files = []
-    for info in infos:
 
-      if isinstance(info, RepoFolder):
-        continue
+    try:
+      for info in infos:
+        print(info)
+        break
+    except EntryNotFoundError:
+      remote_empty = True
 
-      if info.rfilename.startswith(remote_path):
-        last_modified_date: datetime = info.last_commit.date
-        last_modified_utc = last_modified_date.astimezone(timezone.utc)
-        files.append(CloudFile(
-          name=info.rfilename,
-          last_modified_utc=last_modified_utc,
-          size=info.size
-        ))
+    if not remote_empty:
+      for info in infos:
+
+        if isinstance(info, RepoFolder):
+          continue
+
+        if info.rfilename.startswith(remote_path):
+          last_modified_date: datetime = info.last_commit.date
+          last_modified_utc = last_modified_date.astimezone(timezone.utc)
+          files.append(CloudFile(
+            name=info.rfilename,
+            last_modified_utc=last_modified_utc,
+            size=info.size
+          ))
+
     return files
 
 

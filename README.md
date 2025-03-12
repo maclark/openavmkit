@@ -290,24 +290,26 @@ YET_ANOTHER_VARIABLE=123
 
 That's just an example of the format; here are the actual variables that it recognizes:
 
-| Variable Name | Description                                                                                       |
-|---------------|---------------------------------------------------------------------------------------------------|
-| `CLOUD_TYPE` | The type of cloud storage to use.<br>Legal values are: `azure`, `huggingface`, `sftp`             |
-| `CLOUD_ACCESS` | The type of access your cloud storage account has.<br>Legal values are: `read_only`, `read_write` |
-| `AZURE_STORAGE_CONTAINER_NAME` | The name of the Azure storage container                                                           |
-| `AZURE_STORAGE_CONNECTION_STRING` | The connection string for the Azure storage account                                               |
-| `HF_TOKEN` | The Hugging Face API token                                                                        |
-| `HF_REPO_ID` | The Hugging Face repository ID                                                                    |
-| `SFTP_HOST` | The hostname of the SFTP server                                                                   |
-| `SFTP_USERNAME` | The username for the SFTP server                                                                  |
-| `SFTP_PASSWORD` | The password for the SFTP server                                                                  |
-| `SFTP_PORT` | The port number for the SFTP server                                                               |
+| Variable Name                     | Description                                                                                                                                                             |
+|-----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `CLOUD_TYPE`                      | The type of cloud storage to use.<br>Legal values are: `azure`, `huggingface`, `sftp`. You can also set this value per-project in your `settings.json` as `cloud.type`. |
+| `AZURE_ACCESS`                    | The type of access your azure account has.<br>Legal values are: `read_only`, `read_write`.                                                                              |
+| `AZURE_STORAGE_CONTAINER_NAME`    | The name of the Azure storage container                                                                                                                                 |
+| `AZURE_STORAGE_CONNECTION_STRING` | The connection string for the Azure storage account                                                                                                                     |
+| `HF_ACCESS`                       | The type of access your huggingface account has.<br>Legal values are: `read_only`, `read_write`.                                                                        |
+| `HF_TOKEN`                        | The Hugging Face API token                                                                                                                                              |
+| `HF_REPO_ID`                      | The Hugging Face repository ID                                                                                                                                          |
+| `SFTP_ACCESS`                     | The type of access your SFTP account has.<br>Legal values are: `read_only`, `read_write`.                                                                               |
+| `SFTP_HOST`                       | The hostname of the SFTP server                                                                                                                                         |
+| `SFTP_USERNAME`                   | The username for the SFTP server                                                                                                                                        |
+| `SFTP_PASSWORD`                   | The password for the SFTP server                                                                                                                                        |
+| `SFTP_PORT`                       | The port number for the SFTP server                                                                                                                                     |
 
 You only need to provide values for the service that you're actually using. For instance, here's what the file might look like if you are using Hugging Face:
 
 ```
 CLOUD_TYPE=huggingface
-CLOUD_ACCESS=read_write
+HF_ACCESS=read_write
 HF_REPO_ID=landeconomics/localities-public
 HF_TOKEN=<YOUR_HUGGING_FACE_API_TOKEN>
 ```
@@ -316,7 +318,7 @@ If you're just getting started, you can just use read-only access to an existing
 
 ```
 CLOUD_TYPE=huggingface
-CLOUD_ACCESS=read_only
+HF_ACCESS=read_only
 HF_REPO_ID=landeconomics/localities
 ```
 
@@ -324,6 +326,7 @@ This will let you download the inputs for any of the Center for Land Economics' 
 
 If you want to sync with your own cloud storage, you will need to set up your own hosting account and then provide the appropriate credentials in the `.env` file.
 
+If you have multiple projects stored on different cloud services, you can set the `CLOUD_TYPE` and `CLOUD_ACCESS` variables in your settings.json. This will allow you to switch between cloud services on a per-project basis. **Do not ever store credentials in your settings.json, however, as these are uploaded to the cloud!**
 
 ## Configuring PDF report generation
 

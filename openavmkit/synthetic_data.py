@@ -168,7 +168,8 @@ def generate_basic(
 		"total_value": [],
 		"dist_to_cbd": [],
 		"latitude": [],
-		"longitude": []
+		"longitude": [],
+		"is_vacant": []
 	}
 
 	data_sales = {
@@ -276,6 +277,8 @@ def generate_basic(
 			bldg_age_years = np.clip(np.random.normal(20, 10), 0, 100)
 			land_value = land_area_sqft * land_value_per_land_sqft
 
+			is_vacant = bldg_area_finished_sqft <= 0
+
 			bldg_type = np.random.choice(["A", "B", "C"])
 
 			bldg_type_mult = 1.0
@@ -339,7 +342,7 @@ def generate_basic(
 				sale_year_month = f"{sale_year:04}-{sale_month:02}"
 				sale_year_quarter = f"{sale_year:04}Q{sale_quarter}"
 
-				vacant_sale = bldg_area_finished_sqft <= 0
+				vacant_sale = is_vacant
 
 			geometry = create_square(longitude, latitude, height, width)
 
@@ -358,6 +361,7 @@ def generate_basic(
 			data["latitude"].append(latitude)
 			data["longitude"].append(longitude)
 			data["geometry"].append(geometry)
+			data["is_vacant"].append(is_vacant)
 
 			data_sales["key"].append(str(key))
 			data_sales["valid_sale"].append(valid_sale)

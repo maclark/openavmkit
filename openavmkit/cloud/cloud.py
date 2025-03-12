@@ -7,10 +7,28 @@ from openavmkit.cloud.huggingface import get_creds_from_env_huggingface, init_se
 from openavmkit.cloud.sftp import get_creds_from_env_sftp, init_service_sftp
 
 
-def init(verbose: bool, env_path: str = "") -> CloudService | None:
+def init(verbose: bool, env_path: str = "", settings:dict = None) -> CloudService | None:
   load_dotenv(dotenv_path=env_path)
+
+  if settings is not None:
+    s_cloud = settings.get("cloud", {})
+  else:
+    s_cloud = {}
+
   cloud_type = os.getenv("CLOUD_TYPE")
-  cloud_access = os.getenv("CLOUD_ACCESS")
+  cloud_type = s_cloud.get("type", cloud_type)
+  if cloud_type is not None:
+    cloud_type = cloud_type.lower()
+
+  cloud_access = _get_cloud_access(cloud_type)
+
+  if s_cloud is not None:
+    cloud_access = s_cloud.get("access", cloud_access)
+    illegal_values = ["hf_token", "azure_storage_connection_string", "sftp_password", "sftp_username"]
+    for key in illegal_values:
+      if key.lower() in s_cloud:
+        raise ValueError(f"Sensitive credentials '{key}' should never be stored in your settings file! They should ONLY be in your local .env file!")
+
   if verbose:
     print(f"Initializing cloud service of type '{cloud_type}' with access '{cloud_access}'...")
   if cloud_type is None:
@@ -19,7 +37,7 @@ def init(verbose: bool, env_path: str = "") -> CloudService | None:
     raise ValueError("Missing 'CLOUD_ACCESS' in environment. Have you created your .env file and properly filled it out?")
   cloud_type = cloud_type.lower()
   cloud_access = cloud_access.lower()
-  credentials = _get_creds_from_env()
+  credentials = _get_creds_from_env(cloud_type)
 
   try:
     cloud_service = _init_service(cloud_type, cloud_access, credentials)
@@ -29,8 +47,21 @@ def init(verbose: bool, env_path: str = "") -> CloudService | None:
   return cloud_service
 
 
-def _get_creds_from_env() -> CloudCredentials:
-  cloud_type = os.getenv("CLOUD_TYPE").lower()
+def _get_cloud_access(cloud_type):
+  key = ""
+  if cloud_type == "azure":
+    key = "AZURE_ACCESS"
+  elif cloud_type == "huggingface":
+    key = "HF_ACCESS"
+  elif cloud_type == "sftp":
+    key = "SFTP_ACCESS"
+  if key != "":
+    return os.getenv(key)
+  else:
+    raise ValueError(f"Unsupported cloud type: {cloud_type}")
+
+
+def _get_creds_from_env(cloud_type: str) -> CloudCredentials:
   if cloud_type == "azure":
     return get_creds_from_env_azure()
   elif cloud_type == "huggingface":

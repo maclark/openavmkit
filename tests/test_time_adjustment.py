@@ -3,6 +3,7 @@ import pandas as pd
 from IPython.core.display_functions import display
 from matplotlib import pyplot as plt
 
+from openavmkit.data import get_hydrated_sales_from_sup, SalesUniversePair
 from openavmkit.synthetic_data import generate_basic
 from openavmkit.time_adjustment import _crunch_time_adjustment, _interpolate_missing_periods, _flatten_periods_to_days, \
   calculate_time_adjustment, apply_time_adjustment
@@ -61,15 +62,18 @@ def test_interpolate_missing_periods():
 def test_time_adjustment():
   print("")
   sd = generate_basic(100)
-  df = sd.df
+
+  sup = SalesUniversePair(sd.df_sales, sd.df_universe)
+  df = get_hydrated_sales_from_sup(sup)
+
   df.loc[df["sale_year_quarter"].eq("2024-Q3"), "sale_price_per_impr_sqft"] = None
 
   # TODO: replace with proper sales subset function
   df = df[df["sale_price"].gt(0) & df["valid_sale"].ge(1)]
 
-  df_time_m = calculate_time_adjustment(df, "M")
-  df_time_q = calculate_time_adjustment(df, "Q")
-  df_time_y = calculate_time_adjustment(df, "Y")
+  df_time_m = calculate_time_adjustment(df, settings={}, period="M")
+  df_time_q = calculate_time_adjustment(df, settings={}, period="Q")
+  df_time_y = calculate_time_adjustment(df, settings={}, period="Y")
 
   time_land_mult = sd.time_land_mult.copy()
 
@@ -95,13 +99,15 @@ def test_time_adjustment():
 def test_apply_time_adjustment():
   print("")
   sd = generate_basic(100)
-  df = sd.df
+
+  sup = SalesUniversePair(sd.df_sales, sd.df_universe)
+  df = get_hydrated_sales_from_sup(sup)
 
   # TODO: replace with proper sales subset function
   df = df[df["sale_price"].gt(0) & df["valid_sale"].ge(1)]
 
   for period, color, color2 in [("M","red", "pink"), ("Q","blue", "skyblue"), ("Y","black", "lightgray")]:
-    df = apply_time_adjustment(df, {}, period, verbose=True)
+    df = apply_time_adjustment(df, settings={}, period=period, verbose=True)
 
     df_median = df.groupby("sale_year_month")["sale_price_time_adj_per_impr_sqft"].agg(["count", "median"])
     df_median["period"] = pd.to_datetime(df_median.index)

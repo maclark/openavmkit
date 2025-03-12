@@ -1,18 +1,24 @@
 import importlib
 import json
 import os
+import warnings
 
 import pandas as pd
 from datetime import datetime
 
-def load_settings(settings_file: str = "in/settings.json", settings_object: dict = None):
+def load_settings(settings_file: str = "in/settings.json", settings_object: dict = None, error=True):
   if settings_object is None:
     try:
       with open(settings_file, "r") as f:
         settings = json.load(f)
     except FileNotFoundError:
       cwd = os.getcwd()
-      raise FileNotFoundError(f"Could not find settings file: {settings_file}. Go to '{cwd}' and create a settings.json file there!")
+      msg = f"Could not find settings file: {settings_file}. Go to '{cwd}' and create a settings.json file there!"
+      if error:
+        raise FileNotFoundError(msg)
+      else:
+        warnings.warn(msg)
+
   else:
     settings = settings_object
 
