@@ -377,7 +377,10 @@ def _write_ratio_study_report(all_results: dict, settings: dict, model_group: st
 
 		for modeler in all_results:
 			modeler_entry = all_results[modeler]
-			overall_entry : RatioStudyBootstrapped = modeler_entry.get("overall")
+			if modeler_entry == {}:
+				overall_entry = RatioStudyBootstrapped(np.array([]), np.array([]))
+			else:
+				overall_entry : RatioStudyBootstrapped = modeler_entry.get("overall")
 
 			data_untrim = []
 			data_trim = []

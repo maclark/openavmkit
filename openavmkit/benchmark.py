@@ -9,7 +9,7 @@ from statsmodels.nonparametric.kernel_regression import KernelReg
 from xgboost import XGBRegressor
 
 from openavmkit.data import get_important_field, get_locations, _read_split_keys, SalesUniversePair, \
-	get_hydrated_sales_from_sup, get_report_locations
+	get_hydrated_sales_from_sup, get_report_locations, get_sales
 from openavmkit.modeling import run_mra, run_gwr, run_xgboost, run_lightgbm, run_catboost, SingleModelResults, \
 	run_garbage, run_average, run_naive_sqft, predict_garbage, \
 	run_kernel, run_local_sqft, run_assessor, predict_average, predict_naive_sqft, predict_local_sqft, \
@@ -2047,6 +2047,15 @@ def _run_models(
 	outpath = f"out/models/{model_group}/{vacant_status}"
 	if not os.path.exists(outpath):
 		os.makedirs(outpath)
+
+	df_sales_count = get_sales(df_sales, settings, vacant_only)
+
+	if len(df_sales_count) == 0:
+		print(f"No sales records found for model_group: {model_group}, vacant_only: {vacant_only}. Skipping...")
+		return
+
+	if len(df_sales_count) < 15:
+		warnings.warn(f"For model_group: {model_group}, vacant_only: {vacant_only}, there are fewer than 15 sales records. Model might not be any good!")
 
 	var_recs = get_variable_recommendations(
 		df_sales,
