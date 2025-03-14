@@ -3,6 +3,7 @@ import warnings
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import shapely
 from geopy import Point
 from geopy.distance import distance
@@ -410,3 +411,36 @@ def identify_irregular_parcels(gdf, verbose=False, tolerance=10, complex_thresho
   gdf = gdf.to_crs(old_crs)
 
   return gdf
+
+
+def geolocate_point_to_polygon(gdf: gpd.GeoDataFrame, df_in: pd.DataFrame, lat_field: str, lon_field: str, parcel_id_field: str):
+  # Make a local copy
+  df = df_in.copy()
+
+  if "geometry" in df.columns:
+    warnings.warn("You're doing a `lat_lon` merge of a DataFrame that also has a `geometry` column. The geometry column will be discarded.")
+
+  # Strip old geometry if it exists and replace it with points corresponding to lat/lon fields
+  df = df.drop(columns="geometry", errors="ignore")
+  df["geometry"] = df.apply(lambda row: shapely.geometry.Point(row[lon_field], row[lat_field]), axis=1)
+  df = gpd.GeoDataFrame(df, geometry="geometry")
+
+  # Match the CRS
+  df.set_crs(gdf.crs, inplace=True)
+
+  # reset index and set a "temp_index" of numerical index values
+  df.reset_index(drop=True)
+  df["temp_index"] = df.index
+
+  # perform the spatial join, each lat/lon matched to the parcel it's inside of
+  gdf_joined = gpd.sjoin(df, gdf[[parcel_id_field, "geometry"]], how="left", predicate="within")
+
+  # now we have a DataFrame that matches each row in df_in to a `parcel_id_field` in gdf
+
+  # merge parcel_id_field back onto df:
+  df = df.merge(gdf_joined[[parcel_id_field, "temp_index"]], on="temp_index", how="left")
+
+  # drop the temporary index and the point geometry:
+  df = df.drop(columns=["temp_index", "geometry"])
+
+  return df

@@ -268,5 +268,15 @@ def cache(path: str, logic: callable):
 	result = logic()
 	os.makedirs(os.path.dirname(outpath), exist_ok=True)
 	with open(outpath, "wb") as f:
-		pickle.dump(result, f)
-	return result
+    pickle.dump(result, f)
+  return result
+
+
+def count_values_in_common(a: pd.DataFrame, b: pd.DataFrame, a_field: str, b_field: str = None):
+    if b_field is None:
+      b_field = a_field
+    a_values = set(a[a_field].dropna().unique())
+    b_values = set(b[b_field].dropna().unique())
+    a_in_b = a_values.intersection(b_values)
+    b_in_a = b_values.intersection(a_values)
+    return len(a_in_b), len(b_in_a)

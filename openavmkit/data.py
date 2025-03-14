@@ -15,7 +15,8 @@ from shapely.ops import unary_union
 from openavmkit.calculations import _crawl_calc_dict_for_fields, perform_calculations
 from openavmkit.filters import resolve_filter, select_filter
 from openavmkit.utilities.data import combine_dfs, div_field_z_safe
-from openavmkit.utilities.geometry import get_crs, clean_geometry, identify_irregular_parcels, get_exterior_coords
+from openavmkit.utilities.geometry import get_crs, clean_geometry, identify_irregular_parcels, get_exterior_coords, \
+	geolocate_point_to_polygon
 from openavmkit.utilities.settings import get_fields_categorical, get_fields_impr, get_fields_boolean, \
 	get_fields_numeric, get_model_group_ids, get_fields_date, get_long_distance_unit, get_valuation_date
 
@@ -1347,7 +1348,8 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
 			time_format_map[xkey] = extra_map[xkey]
 	for dkey in date_fields:
 		if dkey not in time_format_map:
-			raise ValueError(f"Date field '{dkey}' does not have a time format specified.")
+			example_value = df[~df[dkey].isna()][dkey].iloc[0]
+			raise ValueError(f"Date field '{dkey}' does not have a time format specified. Example value from {dkey}: \"{example_value}\"")
 	df = enrich_time(df, time_format_map, settings)
 
 	dupes = entry.get("dupes", None)
@@ -1516,6 +1518,18 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 		on = merge.get("on", "key")
 		if df_merged is None:
 			df_merged = df
+		elif how == "append":
+			df_merged = pd.concat([df_merged, df], ignore_index=True)
+		elif how == "lat_long":
+			if not (isinstance(df_merged, gpd.GeoDataFrame) and "geometry" in df_merged):
+				raise ValueError("Cannot perform lat_long merge against a non-geodataframe. Make sure there is a geodataframe earlier in the merge chain.")
+			if "latitude" not in df.columns and "longitude" not in df.columns:
+				raise ValueError("Neither 'latitude' nor 'longitude' fields found in dataframe being merged with 'lat_long'")
+			if "latitude" not in df.columns:
+				raise ValueError("No 'latitude' field found in dataframe being merged with 'lat_long'")
+			if "longitude" not in df.columns:
+				raise ValueError("No 'longitude' field found in dataframe being merged with 'lat_long'")
+			df_merged = geolocate_point_to_polygon(df_merged, df, lat_field="latitude", lon_field="longitude", parcel_id_field=on)
 		else:
 			df_merged = pd.merge(df_merged, df, how=how, on=on, suffixes=("", f"_{_id}"))
 
@@ -1555,6 +1569,10 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 	len_new = len(df_merged)
 	if len_new < len_old:
 		warnings.warn(f"Dropped {len_old - len_new} rows due to missing primary key.")
+
+	# ensure a clean index:
+	df_merged = df_merged.reset_index(drop=True)
+
 	return df_merged
 
 

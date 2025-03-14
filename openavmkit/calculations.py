@@ -117,6 +117,11 @@ def _do_calc(df_in: pd.DataFrame, entry: list, i:int=0):
     return np.abs(lhs)
   elif op == "strip":
     return lhs.astype(str).str.strip()
+  elif op == "striplzero":
+    return lhs.astype(str).str.lstrip("0")
+  elif op == "stripkey":
+    return lhs.astype(str).str.strip().str.lstrip("0")
+
 
   # Binary operations (LHS & RHS)
 
@@ -148,6 +153,9 @@ def _do_calc(df_in: pd.DataFrame, entry: list, i:int=0):
   elif op == "map":
     lhs = lhs.astype(str)
     return lhs.map(rhs).fillna(lhs)
+  elif op == "fillna":
+    lhs.loc[pd.isna(lhs)]
+    #return lhs.fillna(rhs)
   elif op == "replace":
     for key in rhs:
       old = key
