@@ -8,7 +8,7 @@ from openavmkit.utilities.settings import get_model_group_ids
 
 
 def clean_column_names(df: pd.DataFrame):
-	"""
+  """
   Clean the column names in a DataFrame by replacing forbidden characters with legal representations.
 
   :param df: Input DataFrame.
@@ -16,20 +16,20 @@ def clean_column_names(df: pd.DataFrame):
   :returns: DataFrame with cleaned column names.
   :rtype: pandas.DataFrame
   """
-	# Find column names that contain forbidden characters and replace them with legal representations.
-	replace_map = {
-		"[": "_LBRKT_",
-		"]": "_RBRKT_",
-		"<NA>": "_NA_",
-		"<": "_LT_",
-	}
-	for key in replace_map:
-		df.columns = df.columns.str.replace(key, replace_map[key])
-	return df
+  # Find column names that contain forbidden characters and replace them with legal representations.
+  replace_map = {
+    "[": "_LBRKT_",
+    "]": "_RBRKT_",
+    "<NA>": "_NA_",
+    "<": "_LT_",
+  }
+  for key in replace_map:
+    df.columns = df.columns.str.replace(key, replace_map[key])
+  return df
 
 
 def div_field_z_safe(numerator: pd.Series | np.ndarray, denominator: pd.Series | np.ndarray):
-	"""
+  """
   Perform a divide-by-zero-safe division of two series or arrays, replacing division by zero with None.
 
   :param numerator: Numerator series or array.
@@ -39,26 +39,26 @@ def div_field_z_safe(numerator: pd.Series | np.ndarray, denominator: pd.Series |
   :returns: The result of the division with divide-by-zero cases replaced by None.
   :rtype: pandas.Series or numpy.ndarray
   """
-	# Get the index of all rows where the denominator is zero.
-	idx_denominator_zero = (denominator == 0)
+  # Get the index of all rows where the denominator is zero.
+  idx_denominator_zero = (denominator == 0)
 
-	# Get the numerator and denominator for rows where the denominator is not zero.
-	series_numerator = numerator[~idx_denominator_zero]
-	series_denominator = denominator[~idx_denominator_zero]
+  # Get the numerator and denominator for rows where the denominator is not zero.
+  series_numerator = numerator[~idx_denominator_zero]
+  series_denominator = denominator[~idx_denominator_zero]
 
-	# Make a copy of the denominator and convert to a float type.
-	result = denominator.copy().astype("Float64")
+  # Make a copy of the denominator and convert to a float type.
+  result = denominator.copy().astype("Float64")
 
-	# Replace all values where denominator is zero with None.
-	result[idx_denominator_zero] = None
+  # Replace all values where denominator is zero with None.
+  result[idx_denominator_zero] = None
 
-	# Replace other values with the result of the division.
-	result[~idx_denominator_zero] = series_numerator / series_denominator
-	return result
+  # Replace other values with the result of the division.
+  result[~idx_denominator_zero] = series_numerator / series_denominator
+  return result
 
 
 def div_z_safe(df: pd.DataFrame, numerator: str, denominator: str):
-	"""
+  """
   Perform a divide-by-zero-safe division of two columns in a DataFrame, replacing division by zero with None.
 
   :param df: Input DataFrame.
@@ -70,26 +70,26 @@ def div_z_safe(df: pd.DataFrame, numerator: str, denominator: str):
   :returns: A pandas Series with the result of the safe division.
   :rtype: pandas.Series
   """
-	# Get the index of all rows where the denominator is zero.
-	idx_denominator_zero = df[denominator].eq(0)
+  # Get the index of all rows where the denominator is zero.
+  idx_denominator_zero = df[denominator].eq(0)
 
-	# Get the numerator and denominator for rows where the denominator is not zero.
-	series_numerator = df.loc[~idx_denominator_zero, numerator]
-	series_denominator = df.loc[~idx_denominator_zero, denominator]
+  # Get the numerator and denominator for rows where the denominator is not zero.
+  series_numerator = df.loc[~idx_denominator_zero, numerator]
+  series_denominator = df.loc[~idx_denominator_zero, denominator]
 
-	# Make a copy of the denominator.
-	result = df[denominator].copy()
+  # Make a copy of the denominator.
+  result = df[denominator].copy()
 
-	# Replace values where denominator is zero with None.
-	result[idx_denominator_zero] = None
+  # Replace values where denominator is zero with None.
+  result[idx_denominator_zero] = None
 
-	# Replace other values with the result of the division.
-	result[~idx_denominator_zero] = series_numerator / series_denominator
-	return result
+  # Replace other values with the result of the division.
+  result[~idx_denominator_zero] = series_numerator / series_denominator
+  return result
 
 
 def dataframe_to_markdown(df: pd.DataFrame):
-	"""
+  """
   Convert a DataFrame to a markdown-formatted string.
 
   :param df: Input DataFrame.
@@ -97,16 +97,16 @@ def dataframe_to_markdown(df: pd.DataFrame):
   :returns: Markdown string representation of the DataFrame.
   :rtype: str
   """
-	header = "| " + " | ".join(df.columns) + " |"
-	separator = "| " + " | ".join(["---"] * len(df.columns)) + " |"
-	rows = "\n".join(
-		"| " + " | ".join(row) + " |" for row in df.astype(str).values
-	)
-	return f"{header}\n{separator}\n{rows}"
+  header = "| " + " | ".join(df.columns) + " |"
+  separator = "| " + " | ".join(["---"] * len(df.columns)) + " |"
+  rows = "\n".join(
+    "| " + " | ".join(row) + " |" for row in df.astype(str).values
+  )
+  return f"{header}\n{separator}\n{rows}"
 
 
 def rename_dict(dict, renames):
-	"""
+  """
   Rename the keys of a dictionary according to a given rename map.
 
   :param dict_obj: Original dictionary.
@@ -116,15 +116,15 @@ def rename_dict(dict, renames):
   :returns: New dictionary with keys renamed.
   :rtype: dict
   """
-	new_dict = {}
-	for key in dict:
-		new_key = renames.get(key, key)
-		new_dict[new_key] = dict[key]
-	return new_dict
+  new_dict = {}
+  for key in dict:
+    new_key = renames.get(key, key)
+    new_dict[new_key] = dict[key]
+  return new_dict
 
 
 def do_per_model_group(df_in: pd.DataFrame, settings: dict, func: callable, params: dict, verbose: bool = False) -> pd.DataFrame:
-	"""
+  """
   Apply a function to each subset of the DataFrame grouped by 'model_group', updating rows based on matching indices.
 
   :param df_in: Input DataFrame.
@@ -140,38 +140,38 @@ def do_per_model_group(df_in: pd.DataFrame, settings: dict, func: callable, para
   :returns: Modified DataFrame with updates from the function.
   :rtype: pandas.DataFrame
   """
-	df = df_in.copy()
-	model_groups = get_model_group_ids(settings, df_in)
+  df = df_in.copy()
+  model_groups = get_model_group_ids(settings, df_in)
 
-	for model_group in model_groups:
-		if pd.isna(model_group):
-			continue
+  for model_group in model_groups:
+    if pd.isna(model_group):
+      continue
 
-		if verbose:
-			print(f"Processing model group: {model_group}")
+    if verbose:
+      print(f"Processing model group: {model_group}")
 
-		# Copy params locally to avoid side effects.
-		params_local = params.copy()
-		params_local["model_group"] = model_group
+    # Copy params locally to avoid side effects.
+    params_local = params.copy()
+    params_local["model_group"] = model_group
 
-		# Filter the subset.
-		df_sub = df[df["model_group"].eq(model_group)]
+    # Filter the subset.
+    df_sub = df[df["model_group"].eq(model_group)]
 
-		# Apply the function.
-		df_sub_updated = func(df_sub, **params_local)
+    # Apply the function.
+    df_sub_updated = func(df_sub, **params_local)
 
-		if df_sub_updated is not None:
-			# Ensure consistent data types between df and the updated subset.
-			for col in df_sub_updated.columns:
-				if col == "key":
-					continue
-				df = combine_dfs(df, df_sub_updated[["key", col]], df2_stomps=True)
+    if df_sub_updated is not None:
+      # Ensure consistent data types between df and the updated subset.
+      for col in df_sub_updated.columns:
+        if col == "key":
+          continue
+        df = combine_dfs(df, df_sub_updated[["key", col]], df2_stomps=True)
 
-	return df
+  return df
 
 
 def combine_dfs(df1: pd.DataFrame, df2: pd.DataFrame, df2_stomps=False, index: str = "key") -> pd.DataFrame:
-	"""
+  """
   Combine two DataFrames on a given index column.
 
   If df2_stomps is False, NA values in df1 are filled with values from df2.
@@ -188,44 +188,44 @@ def combine_dfs(df1: pd.DataFrame, df2: pd.DataFrame, df2_stomps=False, index: s
   :returns: Combined DataFrame.
   :rtype: pandas.DataFrame
   """
-	df = df1.copy()
-	# Save the original index for restoration
-	original_index = df.index.copy()
+  df = df1.copy()
+  # Save the original index for restoration
+  original_index = df.index.copy()
 
-	# Work on a copy so we don’t modify df2 outside this function.
-	df2 = df2.copy()
+  # Work on a copy so we don’t modify df2 outside this function.
+  df2 = df2.copy()
 
-	# Set the index to the key column for alignment.
-	df.index = df[index]
-	df2.index = df2[index]
+  # Set the index to the key column for alignment.
+  df.index = df[index]
+  df2.index = df2[index]
 
-	# Iterate over columns in df2 (skip the key column).
-	for col in df2.columns:
-		if col == index:
-			continue
-		if col in df.columns:
-			# Find the common keys to avoid KeyErrors if df2 has extra keys.
-			common_idx = df.index.intersection(df2.index)
-			if df2_stomps:
-				# Overwrite all values in df for common keys.
-				df.loc[common_idx, col] = df2.loc[common_idx, col]
-			else:
-				# For common keys, fill only NA values.
-				na_mask = pd.isna(df.loc[common_idx, col])
-				# Only assign where df2 has a value and df is NA.
-				df.loc[common_idx[na_mask], col] = df2.loc[common_idx[na_mask], col]
-		else:
-			# Add the new column, aligning by index.
-			# (Rows in df without a corresponding key in df2 will get NaN.)
-			df[col] = df2[col]
+  # Iterate over columns in df2 (skip the key column).
+  for col in df2.columns:
+    if col == index:
+      continue
+    if col in df.columns:
+      # Find the common keys to avoid KeyErrors if df2 has extra keys.
+      common_idx = df.index.intersection(df2.index)
+      if df2_stomps:
+        # Overwrite all values in df for common keys.
+        df.loc[common_idx, col] = df2.loc[common_idx, col]
+      else:
+        # For common keys, fill only NA values.
+        na_mask = pd.isna(df.loc[common_idx, col])
+        # Only assign where df2 has a value and df is NA.
+        df.loc[common_idx[na_mask], col] = df2.loc[common_idx[na_mask], col]
+    else:
+      # Add the new column, aligning by index.
+      # (Rows in df without a corresponding key in df2 will get NaN.)
+      df[col] = df2[col]
 
-	# Restore the original index.
-	df.index = original_index
-	return df
+  # Restore the original index.
+  df.index = original_index
+  return df
 
 
 def add_sqft_fields(df_in: pd.DataFrame):
-	"""
+  """
   Add per-square-foot fields to the DataFrame for land and improvement values.
 
   This function creates new columns based on existing value fields and area fields.
@@ -235,20 +235,20 @@ def add_sqft_fields(df_in: pd.DataFrame):
   :returns: DataFrame with additional per-square-foot fields.
   :rtype: pandas.DataFrame
   """
-	df = df_in.copy()
-	land_sqft = ["model_market_value", "model_land_value", "assr_market_value", "assr_land_value"]
-	impr_sqft = ["model_market_value", "model_impr_value", "assr_market_value", "assr_impr_value"]
-	for field in land_sqft:
-		if field in df:
-			df[field + "_land_sqft"] = div_field_z_safe(df[field], df["land_area_sqft"])
-	for field in impr_sqft:
-		if field in df:
-			df[field + "_impr_sqft"] = div_field_z_safe(df[field], df["bldg_area_finished_sqft"])
-	return df
+  df = df_in.copy()
+  land_sqft = ["model_market_value", "model_land_value", "assr_market_value", "assr_land_value"]
+  impr_sqft = ["model_market_value", "model_impr_value", "assr_market_value", "assr_impr_value"]
+  for field in land_sqft:
+    if field in df:
+      df[field + "_land_sqft"] = div_field_z_safe(df[field], df["land_area_sqft"])
+  for field in impr_sqft:
+    if field in df:
+      df[field + "_impr_sqft"] = div_field_z_safe(df[field], df["bldg_area_finished_sqft"])
+  return df
 
 
 def cache(path: str, logic: callable):
-	"""
+  """
   Cache a computed result to disk.
 
   If the file at the given path exists, load and return the cached result. Otherwise,
@@ -261,13 +261,13 @@ def cache(path: str, logic: callable):
   :returns: The cached or computed result.
   :rtype: Any
   """
-	outpath = path
-	if os.path.exists(outpath):
-		with open(outpath, "rb") as f:
-			return pickle.load(f)
-	result = logic()
-	os.makedirs(os.path.dirname(outpath), exist_ok=True)
-	with open(outpath, "wb") as f:
+  outpath = path
+  if os.path.exists(outpath):
+    with open(outpath, "rb") as f:
+      return pickle.load(f)
+  result = logic()
+  os.makedirs(os.path.dirname(outpath), exist_ok=True)
+  with open(outpath, "wb") as f:
     pickle.dump(result, f)
   return result
 

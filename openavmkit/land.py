@@ -119,7 +119,7 @@ def _finalize_land_values(
   # Save the results
   outpath = f"out/models/{model_group}/_cache/land_analysis_final.pickle"
 
-  # STEP 5: Find variables correlated with land value
+  # Find variables correlated with land value
 
   df_subset = df_orig[df_orig["model_group"].eq(model_group)]
   df_sales = get_sales(df_subset, settings)

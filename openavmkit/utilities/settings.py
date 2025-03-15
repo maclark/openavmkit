@@ -13,7 +13,9 @@ def load_settings(settings_file: str = "in/settings.json", settings_object: dict
         settings = json.load(f)
     except FileNotFoundError:
       cwd = os.getcwd()
-      msg = f"Could not find settings file: {settings_file}. Go to '{cwd}' and create a settings.json file there!"
+      full_path = os.path.join(cwd, settings_file)
+      exists = os.path.exists(full_path)
+      msg = f"Could not find settings file: {settings_file}. Go to '{cwd}' and create a settings.json file there! {full_path} exists? {exists}"
       if error:
         raise FileNotFoundError(msg)
       else:

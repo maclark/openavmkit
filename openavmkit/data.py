@@ -465,8 +465,8 @@ def process_data(dataframes: dict[str, pd.DataFrame], settings: dict, verbose: b
 	if merge_sales is None:
 		raise ValueError("No \"sales\" merge instructions found. data.process.merge must have exactly two keys: \"universe\", and \"sales\"")
 
-	df_univ = _merge_dict_of_dfs(dataframes, merge_univ, settings)
-	df_sales = _merge_dict_of_dfs(dataframes, merge_sales, settings)
+	df_univ = _merge_dict_of_dfs(dataframes, merge_univ, settings, required_key="key")
+	df_sales = _merge_dict_of_dfs(dataframes, merge_sales, settings, required_key="key_sale")
 
 	if "valid_sale" not in df_sales:
 		raise ValueError("The 'valid_sale' column is required in the sales data.")
@@ -1446,7 +1446,7 @@ def _handle_duplicated_rows(df_in: pd.DataFrame, dupes: dict) -> pd.DataFrame:
 	return df_in
 
 
-def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, settings: dict) -> pd.DataFrame:
+def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, settings: dict, required_key="key") -> pd.DataFrame:
 	"""
   Merge multiple DataFrames according to merge instructions.
 
@@ -1503,7 +1503,7 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 				all_cols.append(col)
 			else:
 				suffixed = f"{col}_{merge['id']}"
-				suffixes = {col: suffixed}
+				suffixes[col] = suffixed
 				if col not in conflicts:
 					conflicts[col] = []
 				conflicts[col].append(suffixed)
@@ -1562,10 +1562,10 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 			df_merged = df_merged.drop(columns=[col])
 
 	# Final checks
-	if "key" not in df_merged:
-		raise ValueError("No 'key' field found in merged dataframe. This field is required.")
+	if required_key is not None and required_key not in df_merged:
+		raise ValueError(f"No '{required_key}' field found in merged dataframe. This field is required.")
 	len_old = len(df_merged)
-	df_merged = df_merged.dropna(subset=["key"])
+	df_merged = df_merged.dropna(subset=[required_key])
 	len_new = len(df_merged)
 	if len_new < len_old:
 		warnings.warn(f"Dropped {len_old - len_new} rows due to missing primary key.")

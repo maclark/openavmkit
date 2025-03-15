@@ -197,9 +197,21 @@ def stamp_geo_field_onto_df(df_in: gpd.GeoDataFrame, gdf: gpd.GeoDataFrame, fiel
   return joined
 
 
+def offset_coordinate_feet(lat, lon, lat_feet, lon_feet) -> (float, float):
+  lat_km = lat_feet * 0.0003048
+  lon_km = lon_feet * 0.0003048
+  return offset_coordinate_km(lat, lon, lat_km, lon_km)
+
+
 def offset_coordinate_miles(lat, lon, lat_miles, lon_miles) -> (float, float):
   lat_km = lat_miles * 1.60934
   lon_km = lon_miles * 1.60934
+  return offset_coordinate_km(lat, lon, lat_km, lon_km)
+
+
+def offset_coordinate_m(lat, lon, lat_m, lon_m) -> (float, float):
+  lat_km = lat_m / 1000
+  lon_km = lon_m / 1000
   return offset_coordinate_km(lat, lon, lat_km, lon_km)
 
 
@@ -246,7 +258,55 @@ def create_geo_circle(lat, lon, crs, radius_km, num_points=100):
   return gdf
 
 
-def create_geo_rect(lat, lon, crs, width_km, height_km):
+def create_geo_rect_shape(lat, lon, width_km, height_km, anchor_point="center"):
+  """
+  Creates a GeoDataFrame containing a rectangle centered at the specified latitude and longitude.
+  :param lat: The latitude of the center of the rectangle.
+  :param lon: The longitude of the center of the rectangle.
+  :param width_km: The width of the rectangle in kilometers.
+  :param height_km: The height of the rectangle in kilometers.
+  :param anchor_point: The anchor point of the rectangle (center, nw).
+  :return: A GeoDataFrame containing the rectangle.
+  """
+
+  if anchor_point == "center":
+    off_nw_x = -width_km / 2
+    off_ne_x = width_km / 2
+    off_se_x = width_km / 2
+    off_sw_x = -width_km / 2
+
+    off_nw_y = height_km / 2
+    off_ne_y = height_km / 2
+    off_se_y = -height_km / 2
+    off_sw_y = -height_km / 2
+  elif anchor_point == "nw":
+    off_nw_x = 0
+    off_ne_x = width_km
+    off_se_x = width_km
+    off_sw_x = 0
+
+    off_nw_y = 0
+    off_ne_y = 0
+    off_se_y = -height_km
+    off_sw_y = -height_km
+  else:
+    raise ValueError("Invalid anchor point. Choose 'center' or 'nw'.")
+
+  # Calculate the four corners of the rectangle
+  nw_lat, nw_lon = offset_coordinate_km(lat, lon, off_nw_y, off_nw_x)  # NW
+  ne_lat, ne_lon = offset_coordinate_km(lat, lon, off_ne_y, off_ne_x)  # NE
+  se_lat, se_lon = offset_coordinate_km(lat, lon, off_se_y, off_se_x)  # SE
+  sw_lat, sw_lon = offset_coordinate_km(lat, lon, off_sw_y, off_sw_x)  # SW
+
+  # Order: NW → NE → SE → SW → NW (to close polygon)
+  polygon_coords = [(nw_lon, nw_lat), (ne_lon, ne_lat), (se_lon, se_lat), (sw_lon, sw_lat), (nw_lon, nw_lat)]
+
+  # Create a Polygon
+  polygon = Polygon(polygon_coords)
+  return polygon
+
+
+def create_geo_rect(lat, lon, crs, width_km, height_km, anchor_point="center"):
   """
   Creates a GeoDataFrame containing a rectangle centered at the specified latitude and longitude.
   :param lat: The latitude of the center of the rectangle.
@@ -254,19 +314,11 @@ def create_geo_rect(lat, lon, crs, width_km, height_km):
   :param crs: The CRS of the rectangle.
   :param width_km: The width of the rectangle in kilometers.
   :param height_km: The height of the rectangle in kilometers.
+  :param anchor_point: The anchor point of the rectangle (center, nw).
   :return: A GeoDataFrame containing the rectangle.
   """
-  # Calculate the four corners of the rectangle
-  nw_lat, nw_lon = offset_coordinate_km(lat, lon, height_km / 2, -width_km / 2)  # NW
-  ne_lat, ne_lon = offset_coordinate_km(lat, lon, height_km / 2, width_km / 2)   # NE
-  se_lat, se_lon = offset_coordinate_km(lat, lon, -height_km / 2, width_km / 2)  # SE
-  sw_lat, sw_lon = offset_coordinate_km(lat, lon, -height_km / 2, -width_km / 2) # SW
 
-  # Order: NW → NE → SE → SW → NW (to close polygon)
-  polygon_coords = [(nw_lon, nw_lat), (ne_lon, ne_lat), (se_lon, se_lat), (sw_lon, sw_lat), (nw_lon, nw_lat)]
-
-  # Create a Polygon
-  polygon = Polygon(polygon_coords)
+  polygon = create_geo_rect_shape(lat, lon, width_km, height_km, anchor_point="center")
 
   # Create a GeoDataFrame
   gdf = gpd.GeoDataFrame(geometry=[polygon], crs=crs)
@@ -419,6 +471,9 @@ def geolocate_point_to_polygon(gdf: gpd.GeoDataFrame, df_in: pd.DataFrame, lat_f
 
   if "geometry" in df.columns:
     warnings.warn("You're doing a `lat_lon` merge of a DataFrame that also has a `geometry` column. The geometry column will be discarded.")
+
+  # Drop fields that don't have lat/lon values
+  df = df[df[lon_field].notna() & df[lat_field].notna()]
 
   # Strip old geometry if it exists and replace it with points corresponding to lat/lon fields
   df = df.drop(columns="geometry", errors="ignore")
