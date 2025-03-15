@@ -6,7 +6,7 @@ from openavmkit.data import enrich_time
 from openavmkit.horizontal_equity_study import mark_horizontal_equity_clusters
 from openavmkit.ratio_study import run_and_write_ratio_study_breakdowns
 from openavmkit.sales_scrutiny_study import SalesScrutinyStudy, run_sales_scrutiny
-from openavmkit.synthetic_data import generate_basic
+from openavmkit.synthetic.basic import generate_basic
 from openavmkit.time_adjustment import enrich_time_adjustment
 from openavmkit.utilities.settings import get_valuation_date, load_settings
 

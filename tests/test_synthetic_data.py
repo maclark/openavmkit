@@ -1,4 +1,4 @@
-from openavmkit.synthetic_data import generate_inflation_curve
+from openavmkit.synthetic.basic import generate_inflation_curve
 
 
 def test_inflation_curve():

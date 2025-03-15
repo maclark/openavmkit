@@ -4,7 +4,7 @@ import pandas as pd
 from openavmkit.income import calculate_noi, calculate_noi_growth, calculate_cap_rate_growth, derive_irr_df, \
   derive_prices, derive_noi_growth
 from openavmkit.projection import project_trend
-from openavmkit.synthetic_data import generate_income_sales
+from openavmkit.synthetic.basic import generate_income_sales
 from openavmkit.utilities.assertions import dfs_are_equal, lists_are_equal
 from IPython.core.display import display
 

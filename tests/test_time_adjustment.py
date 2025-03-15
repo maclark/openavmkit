@@ -1,12 +1,8 @@
-import numpy as np
 import pandas as pd
-from IPython.core.display_functions import display
-from matplotlib import pyplot as plt
 
 from openavmkit.data import get_hydrated_sales_from_sup, SalesUniversePair
-from openavmkit.synthetic_data import generate_basic
-from openavmkit.time_adjustment import _crunch_time_adjustment, _interpolate_missing_periods, _flatten_periods_to_days, \
-  calculate_time_adjustment, apply_time_adjustment
+from openavmkit.synthetic.basic import generate_basic
+from openavmkit.time_adjustment import _interpolate_missing_periods, calculate_time_adjustment, apply_time_adjustment
 from openavmkit.utilities.assertions import lists_are_equal
 
 
