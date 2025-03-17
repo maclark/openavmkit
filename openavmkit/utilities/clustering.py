@@ -3,7 +3,7 @@ import pandas as pd
 
 def make_clusters(
     df_in: pd.DataFrame,
-    field_location: str,
+    field_location: str|None,
     fields_categorical: list[str],
     fields_numeric: list[str | list[str]] = None,
     min_cluster_size: int = 15,
@@ -14,8 +14,12 @@ def make_clusters(
   # We are assigning a unique id to each cluster
 
   # Phase 1: split the data into clusters based on the location:
-  if field_location in df:
+  if field_location is not None and field_location in df:
     df["cluster"] = df[field_location].astype(str)
+    if verbose:
+      print(f"--> crunching on location, {len(df['cluster'].unique())} clusters")
+  else:
+    df["cluster"] = ""
 
   fields_used = {}
 
@@ -33,9 +37,6 @@ def make_clusters(
       ["bldg_effective_age_years", "bldg_age_years"], # Try effective age years first, then normal age
       "bldg_condition_num"
     ]
-
-  if verbose:
-    print(f"Clustering by location and big five:")
 
   # iterate over numeric fields, trying to crunch down whenever possible:
   for entry in fields_numeric:
@@ -117,6 +118,15 @@ def _crunch(_df, field, min_count):
   ]
   good_series = None
   too_small = False
+
+  # if it's a boolean type:
+  is_boolean = pd.api.types.is_bool_dtype(_df[field])
+  if is_boolean:
+    # convert to 0 and 1:
+    bool_series = _df[field].astype(int)
+    if bool_series.value_counts().min() < min_count:
+      return None
+    return bool_series
 
   for crunch_level in crunch_levels:
     test_bins = []

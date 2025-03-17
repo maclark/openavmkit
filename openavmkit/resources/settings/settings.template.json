@@ -64,6 +64,7 @@
 			"location": "neighborhood",
 			"fields_categorical": [],
 			"fields_numeric": [
+				"is_vacant",
 				"land_area_sqft",
 				"bldg_area_finished_sqft",
 				"bldg_quality_num",

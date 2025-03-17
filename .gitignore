@@ -19,3 +19,4 @@ venv/*
 *catboost_info*
 testing.ipynb
 check_files_encoding.py
+tests/*.csv

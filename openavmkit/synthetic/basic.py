@@ -176,6 +176,7 @@ def generate_basic(
 	data_sales = {
 		"key": [],
 		"valid_sale": [],
+		"valid_for_ratio_study": [],
 		"vacant_sale": [],
 		"is_vacant": [],
 		"sale_price": [],
@@ -381,6 +382,7 @@ def generate_basic(
 			if valid_sale:
 				data_sales["key"].append(str(key))
 				data_sales["valid_sale"].append(valid_sale)
+				data_sales["valid_for_ratio_study"].append(valid_sale)
 				data_sales["vacant_sale"].append(vacant_sale)
 				data_sales["is_vacant"].append(vacant_sale)
 				data_sales["sale_price"].append(sale_price)

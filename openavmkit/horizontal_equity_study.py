@@ -217,14 +217,14 @@ def mark_horizontal_equity_clusters_per_model_group(df_in: pd.DataFrame, setting
 	return do_per_model_group(df_in, settings, _mark_he_ids, {"settings": settings, "verbose": verbose}, verbose)
 
 
-def mark_horizontal_equity_clusters(df: pd.DataFrame, settings: dict, verbose: bool = False):
+def mark_horizontal_equity_clusters(df: pd.DataFrame, settings: dict, verbose: bool = False, settings_object="horizontal_equity", id_name: str = "he_id"):
 	"""
   Compute and mark horizontal equity clusters in the DataFrame.
 
   Uses clustering (via :func:`make_clusters`) based on a location field and categorical/numeric fields specified
   in settings to generate a horizontal equity cluster ID which is stored in the "he_id" column.
 
-  :param df: Input DataFrame.
+  :param df: Input DataFrame
   :type df: pandas.DataFrame
   :param settings: Settings dictionary.
   :type settings: dict
@@ -233,11 +233,12 @@ def mark_horizontal_equity_clusters(df: pd.DataFrame, settings: dict, verbose: b
   :returns: DataFrame with a new "he_id" column.
   :rtype: pandas.DataFrame
   """
-	he = settings.get("analysis", {}).get("horizontal_equity", {})
+	he = settings.get("analysis", {}).get(settings_object, {})
 	location = he.get("location", "neighborhood")
+	location = he.get("location", None)
 	fields_categorical = he.get("fields_categorical", [])
 	fields_numeric = he.get("fields_numeric", None)
-	df["he_id"], _ = make_clusters(df, location, fields_categorical, fields_numeric, verbose=verbose)
+	df[id_name], _ = make_clusters(df, location, fields_categorical, fields_numeric, verbose=verbose)
 	return df
 
 
