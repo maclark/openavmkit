@@ -44,6 +44,18 @@ class LocalSqftModel:
     self.sales_chase = sales_chase
 
 
+class LarsModel:
+  def __init__(
+      self,
+      sqft_model: LocalSqftModel,
+      land_adjustments: dict,
+      impr_adjustments: dict
+  ):
+    self.sqft_model = sqft_model
+    self.land_adjustments = land_adjustments
+    self.impr_adjustments = impr_adjustments
+
+
 class AssessorModel:
   def __init__(
     self,

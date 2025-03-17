@@ -14,12 +14,12 @@ from openavmkit.modeling import run_mra, run_gwr, run_xgboost, run_lightgbm, run
 	run_garbage, run_average, run_naive_sqft, predict_garbage, \
 	run_kernel, run_local_sqft, run_assessor, predict_average, predict_naive_sqft, predict_local_sqft, \
 	predict_assessor, predict_kernel, predict_gwr, predict_xgboost, predict_catboost, predict_lightgbm, \
-	GarbageModel, AverageModel, DataSplit
+	GarbageModel, AverageModel, DataSplit, predict_lars
 from openavmkit.reports import MarkdownReport, _markdown_to_pdf
 from openavmkit.time_adjustment import enrich_time_adjustment
 from openavmkit.utilities.data import div_z_safe, dataframe_to_markdown
 from openavmkit.utilities.format import fancy_format
-from openavmkit.utilities.modeling import NaiveSqftModel, LocalSqftModel, AssessorModel, GWRModel, MRAModel
+from openavmkit.utilities.modeling import NaiveSqftModel, LocalSqftModel, AssessorModel, GWRModel, MRAModel, LarsModel
 from openavmkit.utilities.settings import get_fields_categorical, get_variable_interactions, get_valuation_date, \
 	get_model_group, apply_dd_to_df_rows, get_model_group_ids
 from openavmkit.utilities.stats import calc_vif_recursive_drop, calc_t_values_recursive_drop, \
@@ -563,9 +563,9 @@ def _predict_one_model(
 	elif model_name == "local_sqft":
 		sqft_model: LocalSqftModel = smr.model
 		results = predict_local_sqft(ds, sqft_model, timing, verbose)
-	elif model_name == "local_smart_sqft":
-		sqft_model: LocalSqftModel = smr.model
-		results = predict_local_sqft(ds, sqft_model, timing, verbose)
+	elif model_name == "lars":
+		lars_model: LarsModel = smr.model
+		results = predict_lars(ds, lars_model, timing, verbose)
 	elif model_name == "assessor":
 		assr_model: AssessorModel = smr.model
 		results = predict_assessor(ds, assr_model, timing, verbose)

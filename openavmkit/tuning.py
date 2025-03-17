@@ -8,7 +8,11 @@ from optuna import Trial
 from sklearn.model_selection import KFold
 from sklearn.metrics import mean_absolute_error
 
-def tune_xgboost(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False):
+
+
+
+
+def tune_xgboost(X, y, sizes, he_ids, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False):
     """
     Tunes XGBoost hyperparameters using Optuna and rolling-origin cross-validation.
     Uses the xgboost.train API for training. Includes logging for progress monitoring.
@@ -20,7 +24,7 @@ def tune_xgboost(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None,
         """
         params = {
             "objective": "reg:squarederror",  # Regression objective
-            "eval_metric": "mae",  # Mean Absolute Error
+            "eval_metric": "mae",   # Mean Absolute Error
             "tree_method": "hist",  # Use 'hist' for performance; use 'gpu_hist' for GPUs
             "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.1, log=True),
             "max_depth": trial.suggest_int("max_depth", 3, 15),
@@ -38,7 +42,8 @@ def tune_xgboost(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None,
         num_boost_round = trial.suggest_int("num_boost_round", 100, 3000)
 
         mae = _xgb_rolling_origin_cv(
-            X, y, params, num_boost_round, n_splits, random_state, verbose_eval=False
+            X, y, params, num_boost_round, n_splits, random_state,
+            verbose_eval=False, sizes=sizes, he_ids=he_ids, custom_alpha=0.1
         )
         if verbose:
             print(f"-->trial # {trial.number}/{n_trials}, MAE: {mae:10.0f}, params: {params}")
@@ -166,7 +171,68 @@ def tune_catboost(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None
 ## PRIVATE:
 
 
-def _xgb_rolling_origin_cv(X, y, params, num_boost_round, n_splits=5, random_state=42, verbose_eval=50):
+def _xgb_custom_obj_variance_factory(size, cluster, alpha=0.1):
+    """
+    Returns a custom objective function for XGBoost that adds a variance-based
+    reward term on the normalized predictions (prediction/size) within each cluster.
+
+    Parameters:
+      size   : numpy array of "size" values (one per training instance)
+      cluster: numpy array of "cluster_id" (one per instance)
+      alpha  : weighting factor for the custom reward term relative to MSE.
+    """
+    def custom_obj(preds, dtrain):
+        labels = dtrain.get_label()
+
+        # Standard MSE gradient and hessian
+        grad_mse = preds - labels
+        hess_mse = np.ones_like(preds)
+
+        # Prepare arrays for custom variance gradient and hessian
+        grad_custom = np.zeros_like(preds)
+        hess_custom = np.zeros_like(preds)
+
+        # Process each cluster separately
+        unique_clusters = np.unique(cluster)
+        for cl in unique_clusters:
+            idx = np.where(cluster == cl)[0]
+            if len(idx) == 0:
+                continue
+
+            n = len(idx)
+            # Compute A = prediction/size for each row in this cluster
+            A = preds[idx] / size[idx]
+            m = np.mean(A)
+
+            # Compute gradient for the variance term:
+            # dV/dA_i = (2/n)*(A_i - m)
+            # Then by chain rule: dV/dp_i = dV/dA_i * (1/size)
+            grad_custom[idx] = (2.0 / n) * (A - m) * (1.0 / size[idx])
+
+            # Approximate Hessian: 2/n * (1/size^2)
+            hess_custom[idx] = (2.0 / n) * (1.0 / (size[idx] ** 2))
+
+        # Combine the standard MSE with the custom variance reward term
+        grad = grad_mse + alpha * grad_custom
+        hess = hess_mse + alpha * hess_custom
+
+        return grad, hess
+
+    return custom_obj
+
+
+def _xgb_rolling_origin_cv(
+    X,
+    y,
+    params,
+    num_boost_round,
+    n_splits=5,
+    random_state=42,
+    verbose_eval=50,
+    sizes=None,
+    he_ids=None,
+    custom_alpha=0.1
+):
     """
     Performs rolling-origin cross-validation for XGBoost model evaluation.
 
@@ -197,6 +263,11 @@ def _xgb_rolling_origin_cv(X, y, params, num_boost_round, n_splits=5, random_sta
 
         evals = [(val_data, "validation")]
 
+        # If custom arrays are provided, subset them for training data and build custom objective
+        custom_obj = None
+        if sizes is not None and he_ids is not None:
+            custom_obj = _xgb_custom_obj_variance_factory(size=sizes, cluster=he_ids, alpha=custom_alpha)
+
         # Train XGBoost
         model = xgb.train(
             params=params,
@@ -204,7 +275,8 @@ def _xgb_rolling_origin_cv(X, y, params, num_boost_round, n_splits=5, random_sta
             num_boost_round=num_boost_round,
             evals=evals,
             early_stopping_rounds=50,
-            verbose_eval=verbose_eval  # Ensure verbose_eval is enabled
+            verbose_eval=verbose_eval, # Ensure verbose_eval is enabled
+            obj=custom_obj
         )
 
         # Predict and evaluate

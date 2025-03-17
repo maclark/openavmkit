@@ -194,7 +194,18 @@ def mark_horizontal_equity_clusters_per_model_group_sup(
   :rtype: SalesUniversePair
   """
 	df_universe = sup["universe"]
+	if verbose:
+		print("")
+		print("Marking horizontal equity clusters...")
 	df_universe = mark_horizontal_equity_clusters(df_universe, settings, verbose)
+	if verbose:
+		print("")
+		print("Marking LAND horizontal equity clusters...")
+	df_universe = mark_horizontal_equity_clusters(df_universe, settings, verbose, settings_object="land_equity", id_name="land_he_id")
+	if verbose:
+		print("")
+		print("Marking IMPROVEMENT horizontal equity clusters...")
+	df_universe = mark_horizontal_equity_clusters(df_universe, settings, verbose, settings_object="impr_equity", id_name="impr_he_id")
 	sup.set("universe", df_universe)
 	return sup
 
