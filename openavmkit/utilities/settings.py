@@ -434,10 +434,10 @@ def _merge_settings(template: dict, local: dict, indent:str= ""):
         merged[key] = _merge_settings(entry_t, entry_l, indent + "  ")
       elif isinstance(entry_t, list) and isinstance(entry_l, list):
         # If both are lists, add any new local items that aren't already in template:
-        for item in entry_l:
-          if item not in entry_t:
-            entry_t.append(item)
-        merged[key] = entry_t
+        # for item in entry_l:
+        #   if item not in entry_t:
+        #     entry_t.append(item)
+        merged[key] = entry_l
       else:
         merged[key] = entry_l
     else:
