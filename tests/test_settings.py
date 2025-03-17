@@ -15,6 +15,7 @@ def test_basic():
 
 	template = {
 		"version": "abc",
+		"oranges": ["Navel", "Mandarin"],
 		"apples": ["Macintosh", "Granny Smith", "Red Delicious"],
 		"pantry": {
 			"wood": "pine",
@@ -30,7 +31,6 @@ def test_basic():
 		"bananas": ["Gros Michel", "Cavendish", "Red", "Burro"],
 		"pantry": {
 			"wood": "oak",
-			"spices": ["cinnamon", "cardamon", "clove", "ginger"],
 			"other": {
 				"baking": ["flour", "sugar", "baking soda"],
 				"cooking": ["salt", "pepper"]
@@ -42,13 +42,14 @@ def test_basic():
 
 	expected = {
 		"version": "def",
-		"apples": ["Macintosh", "Granny Smith", "Red Delicious", "Fuji", "Honeycrisp", "Gala", "Cosmic Crisp"],
+		"oranges": ["Navel", "Mandarin"],
+		"apples": ["Fuji", "Honeycrisp", "Gala", "Cosmic Crisp"],
 		"bananas": ["Gros Michel", "Cavendish", "Red", "Burro"],
 		"pantry": {
 			"wood": "oak",
-			"spices": ["cinnamon", "nutmeg", "allspice", "cardamon", "clove", "ginger"],
+			"spices": ["cinnamon", "nutmeg", "allspice"],
 			"other": {
-				"baking": ["baking powder", "baking soda", "flour", "sugar"],
+				"baking": ["flour", "sugar", "baking soda"],
 				"cooking": ["salt", "pepper"]
 			}
 		}
