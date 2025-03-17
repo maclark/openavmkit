@@ -560,7 +560,7 @@ def _predict_one_model(
 	elif model_name == "naive_sqft":
 		sqft_model: NaiveSqftModel = smr.model
 		results = predict_naive_sqft(ds, sqft_model, timing, verbose)
-	elif model_name == "local_naive_sqft":
+	elif model_name == "local_sqft":
 		sqft_model: LocalSqftModel = smr.model
 		results = predict_local_sqft(ds, sqft_model, timing, verbose)
 	elif model_name == "local_smart_sqft":
@@ -657,10 +657,8 @@ def _get_data_split_for(
   :returns: A DataSplit object.
   :rtype: DataSplit
   """
-	if name == "local_naive_sqft":
+	if name == "local_sqft":
 		_ind_vars = location_fields + ["bldg_area_finished_sqft", "land_area_sqft"]
-	elif name == "local_smart_sqft":
-		_ind_vars = ["ss_id"] + location_fields + ["bldg_area_finished_sqft", "land_area_sqft"]
 	elif name == "assessor":
 		_ind_vars = ["assr_land_value"] if hedonic else ["assr_market_value"]
 	elif name == "ground_truth":
@@ -821,10 +819,8 @@ def _run_one_model(
 		results = run_average(ds, average_type="median", sales_chase=sales_chase, verbose=verbose)
 	elif model_name == "naive_sqft":
 		results = run_naive_sqft(ds, sales_chase=sales_chase, verbose=verbose)
-	elif model_name == "local_naive_sqft":
+	elif model_name == "local_sqft":
 		results = run_local_sqft(ds, location_fields=location_fields, sales_chase=sales_chase, verbose=verbose)
-	elif model_name == "local_smart_sqft":
-		results = run_local_sqft(ds, location_fields=["ss_id"] + location_fields, sales_chase=sales_chase, verbose=verbose)
 	elif model_name == "assessor":
 		results = run_assessor(ds, verbose=verbose)
 	elif model_name == "ground_truth":

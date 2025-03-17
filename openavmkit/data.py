@@ -653,18 +653,13 @@ def _enrich_time_field(df: pd.DataFrame, prefix: str, add_year_month: bool = Tru
 		else:
 			raise ValueError(f"The dataframe does not contain a '{prefix}_date' column.")
 	df[f"{prefix}_date"] = pd.to_datetime(df[f"{prefix}_date"], format="%Y-%m-%d", errors="coerce")
-	if f"{prefix}_year" not in df:
-		df[f"{prefix}_year"] = df[f"{prefix}_date"].dt.year
-	if f"{prefix}_month" not in df:
-		df[f"{prefix}_month"] = df[f"{prefix}_date"].dt.month
-	if f"{prefix}_quarter" not in df:
-		df[f"{prefix}_quarter"] = df[f"{prefix}_date"].dt.quarter
+	df[f"{prefix}_year"] = df[f"{prefix}_date"].dt.year
+	df[f"{prefix}_month"] = df[f"{prefix}_date"].dt.month
+	df[f"{prefix}_quarter"] = df[f"{prefix}_date"].dt.quarter
 	if add_year_month:
-		if f"{prefix}_year_month" not in df:
-			df[f"{prefix}_year_month"] = df[f"{prefix}_date"].dt.to_period("M").astype("str")
+		df[f"{prefix}_year_month"] = df[f"{prefix}_date"].dt.to_period("M").astype("str")
 	if add_year_quarter:
-		if f"{prefix}_year_quarter" not in df:
-			df[f"{prefix}_year_quarter"] = df[f"{prefix}_date"].dt.to_period("Q").astype("str")
+		df[f"{prefix}_year_quarter"] = df[f"{prefix}_date"].dt.to_period("Q").astype("str")
 	checks = ["_year", "_month", "_day", "_year_month", "_year_quarter"]
 	for check in checks:
 		if f"{prefix}{check}" in df:

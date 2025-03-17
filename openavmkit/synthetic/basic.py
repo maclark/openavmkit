@@ -148,6 +148,7 @@ def create_square(x: float, y: float, width: float, height: float):
 def generate_basic(
 		size: int,
 		percent_sales: float = 0.1,
+		percent_vacant: float = 0.1,
 		noise_sales: float = 0.05,
 		seed: int = 1337,
 		land_inflation: dict = None,
@@ -176,6 +177,7 @@ def generate_basic(
 		"key": [],
 		"valid_sale": [],
 		"vacant_sale": [],
+		"is_vacant": [],
 		"sale_price": [],
 		"sale_price_per_impr_sqft": [],
 		"sale_price_per_land_sqft": [],
@@ -197,8 +199,8 @@ def generate_basic(
 	nw_lat = latitude_center - width/2
 	nw_lon = longitude_center - height/2
 
-	base_land_value = 250
-	base_bldg_value = 25
+	base_land_value = 5
+	base_bldg_value = 50
 	quality_value = 5
 
 	# set a random seed:
@@ -270,24 +272,37 @@ def generate_basic(
 			land_value_per_land_sqft = 1 + (_base_land_value * (1 - dist_center))
 
 			key = f"{x}-{y}"
-			land_area_sqft = np.random.randint(21780, 43560)
-			bldg_area_finished_sqft = np.random.randint(1000, 2500)
-			bldg_quality_num = np.clip(np.random.normal(3, 1), 0, 6)
-			bldg_condition_num = np.clip(np.random.normal(3, 1), 0, 6)
-			bldg_age_years = np.clip(np.random.normal(20, 10), 0, 100)
+			land_area_sqft = np.random.randint(5445, 21780)
 			land_value = land_area_sqft * land_value_per_land_sqft
 
-			is_vacant = bldg_area_finished_sqft <= 0
+			if np.random.rand() < percent_vacant:
+				is_vacant = True
+			else:
+				is_vacant = False
 
-			bldg_type = np.random.choice(["A", "B", "C"])
+			if not is_vacant:
+				bldg_area_finished_sqft = np.random.randint(1000, 2500)
+				bldg_quality_num = np.clip(np.random.normal(3, 1), 0, 6)
+				bldg_condition_num = np.clip(np.random.normal(3, 1), 0, 6)
+				bldg_age_years = np.clip(np.random.normal(20, 10), 0, 100)
 
-			bldg_type_mult = 1.0
-			if bldg_type == "A":
-				bldg_type_mult = 0.5
-			elif bldg_type == "B":
+				bldg_type = np.random.choice(["A", "B", "C"])
+
 				bldg_type_mult = 1.0
-			elif bldg_type == "C":
-				bldg_type_mult = 2.0
+				if bldg_type == "A":
+					bldg_type_mult = 0.5
+				elif bldg_type == "B":
+					bldg_type_mult = 1.0
+				elif bldg_type == "C":
+					bldg_type_mult = 2.0
+			else:
+				bldg_area_finished_sqft = 0
+				bldg_quality_num = 0
+				bldg_condition_num = 0
+				bldg_age_years = 0
+				land_value = 0
+				bldg_type = ""
+				bldg_type_mult = 0
 
 			bldg_value_per_sqft = (base_bldg_value + (quality_value * bldg_quality_num)) * bldg_type_mult
 
@@ -363,19 +378,21 @@ def generate_basic(
 			data["geometry"].append(geometry)
 			data["is_vacant"].append(is_vacant)
 
-			data_sales["key"].append(str(key))
-			data_sales["valid_sale"].append(valid_sale)
-			data_sales["vacant_sale"].append(vacant_sale)
-			data_sales["sale_price"].append(sale_price)
-			data_sales["sale_price_per_impr_sqft"].append(sale_price_per_impr_sqft)
-			data_sales["sale_price_per_land_sqft"].append(sale_price_per_land_sqft)
-			data_sales["sale_age_days"].append(sale_age_days)
-			data_sales["sale_date"].append(sale_date)
-			data_sales["sale_year"].append(sale_year)
-			data_sales["sale_month"].append(sale_month)
-			data_sales["sale_quarter"].append(sale_quarter)
-			data_sales["sale_year_month"].append(sale_year_month)
-			data_sales["sale_year_quarter"].append(sale_year_quarter)
+			if valid_sale:
+				data_sales["key"].append(str(key))
+				data_sales["valid_sale"].append(valid_sale)
+				data_sales["vacant_sale"].append(vacant_sale)
+				data_sales["is_vacant"].append(vacant_sale)
+				data_sales["sale_price"].append(sale_price)
+				data_sales["sale_price_per_impr_sqft"].append(sale_price_per_impr_sqft)
+				data_sales["sale_price_per_land_sqft"].append(sale_price_per_land_sqft)
+				data_sales["sale_age_days"].append(sale_age_days)
+				data_sales["sale_date"].append(sale_date)
+				data_sales["sale_year"].append(sale_year)
+				data_sales["sale_month"].append(sale_month)
+				data_sales["sale_quarter"].append(sale_quarter)
+				data_sales["sale_year_month"].append(sale_year_month)
+				data_sales["sale_year_quarter"].append(sale_year_quarter)
 
 	df = gpd.GeoDataFrame(data, geometry='geometry')
 	df_sales = pd.DataFrame(data_sales)

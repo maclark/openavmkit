@@ -718,7 +718,7 @@ class SingleModelResults:
     str += f"---->COD    : {self.pred_sales.ratio_study.cod:8.4f}\n"
     str += f"---->PRD    : {self.pred_sales.ratio_study.prd:8.4f}\n"
     str += f"---->PRB    : {self.pred_sales.ratio_study.prb:8.4f}\n"
-    str += f"---->CHD    : {self.pred_test.ratio_study.chd:8.4f}\n"
+    str += f"---->CHD    : {self.chd:8.4f}\n"
     str += f"\n"
     return str
 
@@ -2244,10 +2244,7 @@ def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Timing
     if y_pred_multi is not None:
       y_pred_multi = _sales_chase_univ(df, dep_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
 
-  if "ss_id" in location_fields:
-    name = "local_smart_sqft"
-  else:
-    name = "local_naive_sqft"
+  name = "local_sqft"
 
   if sales_chase:
     name += "*"
