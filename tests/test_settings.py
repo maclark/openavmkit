@@ -12,23 +12,32 @@ def test_basic():
 	#    a. lists
 	#    b. dictionaries
 	#    c. strings
+	# 4. stomp rules:
+	#    a. (blank) (local stomps template entry)
+	#    b. + (template adds to local entry)
+	#    c. ! (local stomps template entry even if template is set to +)
+
+
 
 	template = {
 		"version": "abc",
 		"oranges": ["Navel", "Mandarin"],
 		"apples": ["Macintosh", "Granny Smith", "Red Delicious"],
+		"limes": ["Key", "Persian"],
 		"pantry": {
 			"wood": "pine",
 			"spices": ["cinnamon", "nutmeg", "allspice"],
 			"other": {
-				"baking": ["baking powder", "baking soda"],
+				"+baking": ["baking powder", "baking soda"],
 			}
-		}
+		},
+		"+marbles": ["red", "blue", "green"],
 	}
 	local = {
 		"version": "def",
 		"apples": ["Fuji", "Honeycrisp", "Gala", "Cosmic Crisp"],
 		"bananas": ["Gros Michel", "Cavendish", "Red", "Burro"],
+		"!limes": ["Mexican"],
 		"pantry": {
 			"wood": "oak",
 			"other": {
@@ -45,14 +54,16 @@ def test_basic():
 		"oranges": ["Navel", "Mandarin"],
 		"apples": ["Fuji", "Honeycrisp", "Gala", "Cosmic Crisp"],
 		"bananas": ["Gros Michel", "Cavendish", "Red", "Burro"],
+		"limes": ["Mexican"],
 		"pantry": {
 			"wood": "oak",
 			"spices": ["cinnamon", "nutmeg", "allspice"],
 			"other": {
-				"baking": ["flour", "sugar", "baking soda"],
+				"baking": ["baking powder", "baking soda", "flour", "sugar"],
 				"cooking": ["salt", "pepper"]
 			}
-		}
+		},
+		"marbles": ["red", "blue", "green"]
 	}
 
 	assert dicts_are_equal(merged, expected), f"Expected VS Result:\n{expected}\n{merged}"

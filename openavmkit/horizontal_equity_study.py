@@ -197,20 +197,20 @@ def mark_horizontal_equity_clusters_per_model_group_sup(
 	if verbose:
 		print("")
 		print("Marking horizontal equity clusters...")
-	df_universe = mark_horizontal_equity_clusters(df_universe, settings, verbose)
+	df_universe = mark_horizontal_equity_clusters_per_model_group(df_universe, settings, verbose)
 	if verbose:
 		print("")
 		print("Marking LAND horizontal equity clusters...")
-	df_universe = mark_horizontal_equity_clusters(df_universe, settings, verbose, settings_object="land_equity", id_name="land_he_id")
+	df_universe = mark_horizontal_equity_clusters_per_model_group(df_universe, settings, verbose, settings_object="land_equity", id_name="land_he_id")
 	if verbose:
 		print("")
 		print("Marking IMPROVEMENT horizontal equity clusters...")
-	df_universe = mark_horizontal_equity_clusters(df_universe, settings, verbose, settings_object="impr_equity", id_name="impr_he_id")
+	df_universe = mark_horizontal_equity_clusters_per_model_group(df_universe, settings, verbose, settings_object="impr_equity", id_name="impr_he_id")
 	sup.set("universe", df_universe)
 	return sup
 
 
-def mark_horizontal_equity_clusters_per_model_group(df_in: pd.DataFrame, settings: dict, verbose: bool = False):
+def mark_horizontal_equity_clusters_per_model_group(df_in: pd.DataFrame, settings: dict, verbose: bool = False, settings_object="horizontal_equity", id_name="he_id"):
 	"""
   Mark horizontal equity clusters for each model group within the DataFrame.
 
@@ -225,7 +225,9 @@ def mark_horizontal_equity_clusters_per_model_group(df_in: pd.DataFrame, setting
   :returns: DataFrame with horizontal equity cluster IDs marked.
   :rtype: pandas.DataFrame
   """
-	return do_per_model_group(df_in, settings, _mark_he_ids, {"settings": settings, "verbose": verbose}, verbose)
+	return do_per_model_group(df_in, settings, _mark_he_ids, params={
+		"settings": settings, "verbose": verbose, "settings_object": settings_object, "id_name": id_name
+	}, key="key", verbose=verbose)
 
 
 def mark_horizontal_equity_clusters(df: pd.DataFrame, settings: dict, verbose: bool = False, settings_object="horizontal_equity", id_name: str = "he_id"):
@@ -245,7 +247,6 @@ def mark_horizontal_equity_clusters(df: pd.DataFrame, settings: dict, verbose: b
   :rtype: pandas.DataFrame
   """
 	he = settings.get("analysis", {}).get(settings_object, {})
-	location = he.get("location", "neighborhood")
 	location = he.get("location", None)
 	fields_categorical = he.get("fields_categorical", [])
 	fields_numeric = he.get("fields_numeric", None)
@@ -253,7 +254,7 @@ def mark_horizontal_equity_clusters(df: pd.DataFrame, settings: dict, verbose: b
 	return df
 
 
-def _mark_he_ids(df_in: pd.DataFrame, model_group: str, settings: dict, verbose: bool):
+def _mark_he_ids(df_in: pd.DataFrame, model_group: str, settings: dict, verbose: bool, settings_object="horizontal_equity", id_name: str = "he_id"):
 	"""
   Append the model group identifier to the horizontal equity cluster IDs.
 
@@ -265,8 +266,9 @@ def _mark_he_ids(df_in: pd.DataFrame, model_group: str, settings: dict, verbose:
   :type settings: dict
   :param verbose: If True, prints progress information.
   :type verbose: bool
-  :returns: DataFrame with updated "he_id" column that includes the model group.
-  :rtype: None
+  :returns: DataFrame with updated `id_name` column that includes the model group.
+  :rtype: pandas.DataFrame
   """
-	df = mark_horizontal_equity_clusters(df_in, settings, verbose)
-	df["he_id"] = model_group + "_" + df["he_id"]
+	df = mark_horizontal_equity_clusters(df_in, settings, verbose, settings_object, id_name)
+	df[id_name] = model_group + "_" + df[id_name].astype(str)
+	return df

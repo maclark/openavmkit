@@ -74,7 +74,9 @@
 		},
 		"land_equity": {
 			"location": "neighborhood",
-			"fields_categorical": [],
+			"fields_categorical": [
+				"risk_flood"
+			],
 			"fields_numeric": [
 				"land_area_sqft",
 				"geom_rectangularity_num",
@@ -84,7 +86,6 @@
 				"noise_mean",
 				"is_geom_complex",
 				"is_geom_irregular",
-				"risk_flood",
 				"osm_is_waterfront",
 				"osm_on_golf_course"
 			]
@@ -102,9 +103,9 @@
 			"formats": ["pdf", "html", "md"]
 		}
 	},
-	"field_classification": {
-		"land": {
-			"numeric": [
+	"+field_classification": {
+		"+land": {
+			"+numeric": [
 				"noise_mean",
 				"noise_max",
 				"elevation_mean",
@@ -137,18 +138,17 @@
 				"dist_to_cbd",
 				"aspect_ratio",
 				"geom_vertices",
-				"is_geom_triangular",
-				"is_geom_complex",
-				"is_geom_elongated",
-				"is_geom_irregular",
 				"dist_to_colleges",
 				"dist_to_universities",
 				"dist_to_greenspace",
 				"dist_to_airport",
 				"land_area_median_sqft",
-				"land_area_delta_from_median_sqft"
+				"land_area_delta_from_median_sqft",
+				"geom_rectangularity_num",
+				"land_area_given_sqft",
+				"geom_aspect_ratio"
 			],
-			"categorical": [
+			"+categorical": [
 				"land_class",
 				"rectangularity_txt",
 				"neighborhood",
@@ -171,12 +171,17 @@
 				"osm_playground_name",
 				"osm_swimming_pool_name"
 			],
-			"boolean": [
+			"+boolean": [
+				"is_vacant",
 				"is_triangular",
 				"is_complex_geometry",
 				"is_elongated",
 				"is_irregular",
 				"is_below_buildable_size",
+				"is_geom_triangular",
+				"is_geom_complex",
+				"is_geom_elongated",
+				"is_geom_irregular",
 				"osm_is_corner_lot",
 				"osm_is_cul_de_sac",
 				"osm_is_waterfront",
@@ -186,12 +191,12 @@
 				"osm_on_swimming_pool"
 			]
 		},
-		"impr": {
-			"boolean": [
+		"+impr": {
+			"+boolean": [
 				"new_construction",
 				"newish_construction"
 			],
-			"numeric": [
+			"+numeric": [
 				"bldg_count",
 				"bldg_area_finished_sqft",
 				"bldg_quality_num",
@@ -213,7 +218,7 @@
 				"true_impr_value",
 				"true_impr_value_impr_sqft"
 			],
-			"categorical": [
+			"+categorical": [
 				"bldg_fixtures",
 				"bldg_plumbing",
 				"bldg_class",
@@ -228,10 +233,11 @@
 				"bldg_condition_txt"
 			]
 		},
-		"other": {
-			"numeric": [
+		"+other": {
+			"+numeric": [
 				"sale_age_days",
 				"sale_price",
+				"sale_price_time_adj",
 				"sale_price_land_sqft",
 				"sale_price_impr_sqft",
 				"assr_market_value",
@@ -246,18 +252,23 @@
 				"sale_year",
 				"sale_month",
 				"sale_day",
-				"floor_area_ratio"
+				"floor_area_ratio",
+				"sale_quarter"
 			],
-			"categorical": [
+			"+categorical": [
 				"he_id",
 				"model_group",
 				"warning_vacant_discrepancy",
 				"warning_vacant_positive_year_built",
 				"warning_vacant_positive_impr_numeric",
 				"warning_vacant_has_impr_categorical",
-				"sale_date"
+				"sale_date",
+				"sale_year_month",
+				"sale_year_quarter",
+				"key",
+				"key_sale"
 			],
-			"boolean": [
+			"+boolean": [
 				"is_vacant",
 				"valid_sale",
 				"vacant_sale",

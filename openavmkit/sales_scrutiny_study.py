@@ -82,9 +82,9 @@ class SalesScrutinyStudy:
 
       other_fields = [f for f in other_fields if f in df]
 
-      df_cluster_fields = df[["key"] + other_fields]
+      df_cluster_fields = df[["key_sale"] + other_fields]
       df = calc_sales_scrutiny(df, sale_field_per)
-      df = df.merge(df_cluster_fields, on="key", how="left")
+      df = df.merge(df_cluster_fields, on="key_sale", how="left")
 
       total_anomalies = 0
       for i in range(1, 6):
@@ -118,26 +118,24 @@ class SalesScrutinyStudy:
     df_v = self.df_vacant
     df_i = self.df_improved
 
-    # TODO: add support for "key_sale"
-
     keys_flagged = []
 
     if "flagged" in df_v:
       # remove flagged sales:
-      keys_flagged = df_v[df_v["flagged"].eq(True)]["key"].tolist()
+      keys_flagged = df_v[df_v["flagged"].eq(True)]["key_sale"].tolist()
 
     if "flagged" in df_i:
-      keys_flagged += df_i[df_i["flagged"].eq(True)]["key"].tolist()
+      keys_flagged += df_i[df_i["flagged"].eq(True)]["key_sale"].tolist()
 
     # ensure unique:
     keys_flagged = list(dict.fromkeys(keys_flagged))
 
     if len(df) > 0:
-      df.loc[df["key"].isin(keys_flagged), "valid_sale"] = False
+      df.loc[df["key_sale"].isin(keys_flagged), "valid_sale"] = False
 
       # merge ss_id into df:
-      df = combine_dfs(df, df_v[["key", "ss_id"]])
-      df = combine_dfs(df, df_i[["key", "ss_id"]])
+      df = combine_dfs(df, df_v[["key_sale", "ss_id"]], index="key_sale")
+      df = combine_dfs(df, df_i[["key_sale", "ss_id"]], index="key_sale")
 
     return df
 
@@ -302,7 +300,7 @@ def calc_sales_scrutiny(df_in: pd.DataFrame, sales_field: str):
     # drop low_thresh/high_thresh:
     df = df.drop(columns=["low_thresh", "high_thresh"])
 
-    df = df[["key", "ss_id", "count", sales_field, base_sales_field, "median", "max", "min", "chd", "stdev", "relative_ratio", "med_dist_stdevs", "flagged", "bimodal", "anomaly_1", "anomaly_2", "anomaly_3", "anomaly_4", "anomaly_5"]]
+    df = df[["key_sale", "ss_id", "count", sales_field, base_sales_field, "median", "max", "min", "chd", "stdev", "relative_ratio", "med_dist_stdevs", "flagged", "bimodal", "anomaly_1", "anomaly_2", "anomaly_3", "anomaly_4", "anomaly_5"]]
 
     return df
 
@@ -344,13 +342,13 @@ def mark_sales_scrutiny_clusters(df: pd.DataFrame, settings: dict, verbose: bool
 
 def mark_ss_ids_per_model_group(df_in: pd.DataFrame, settings: dict, verbose: bool = False) -> pd.DataFrame:
   # Mark the sales scrutiny ID's
-  df = do_per_model_group(df_in.copy(), settings, _mark_ss_ids, {"settings": settings, "verbose": verbose})
+  df = do_per_model_group(df_in.copy(), settings, _mark_ss_ids, {"settings": settings, "verbose": verbose}, key="key_sale")
   return df
 
 
 def run_sales_scrutiny_per_model_group(df_in: pd.DataFrame, settings: dict, verbose=False) -> pd.DataFrame:
   # Run sales scrutiny for each model group
-  df = do_per_model_group(df_in.copy(), settings, run_sales_scrutiny, {"settings": settings, "verbose": verbose})
+  df = do_per_model_group(df_in.copy(), settings, run_sales_scrutiny, {"settings": settings, "verbose": verbose}, key="key_sale")
   return df
 
 
@@ -377,6 +375,7 @@ def _mark_ss_ids(df_in: pd.DataFrame, model_group: str, settings: dict, verbose:
 def _get_ss_renames():
   return {
     "key": "Primary key",
+    "key_sale": "Sale key",
     "ss_id": "Sales scrutiny cluster",
     "count": "# of sales in cluster",
     "sale_price": "Sale price",
@@ -453,9 +452,9 @@ def _apply_he_stats(df: pd.DataFrame, cluster_id: str, sales_field: str):
   base_sales_field = _get_base_sales_field(sales_field)
 
   if base_sales_field in df and base_sales_field != sales_field:
-    df = df[["key", "ss_id", sales_field, base_sales_field]].copy()
+    df = df[["key_sale", "ss_id", sales_field, base_sales_field]].copy()
   else:
-    df = df[["key", "ss_id", sales_field]].copy()
+    df = df[["key_sale", "ss_id", sales_field]].copy()
 
   if len(df) > 0:
     df = df.merge(df_cluster, on="ss_id", how="left")
@@ -493,8 +492,8 @@ def _check_for_anomalies(df_in: pd.DataFrame, df_sales: pd.DataFrame, sales_fiel
 
   df_fl = df[df["flagged"].eq(True)]
 
-  df_sqft_fl = df_sqft[df_sqft["key"].isin(df_fl["key"].values)]
-  df_price_fl = df_price[df_price["key"].isin(df_fl["key"].values)]
+  df_sqft_fl = df_sqft[df_sqft["key_sale"].isin(df_fl["key_sale"].values)]
+  df_price_fl = df_price[df_price["key_sale"].isin(df_fl["key_sale"].values)]
 
   # Check for the symptoms
 
@@ -505,32 +504,32 @@ def _check_for_anomalies(df_in: pd.DataFrame, df_sales: pd.DataFrame, sales_fiel
   idx_price_low = df_price_fl["relative_ratio"].le(1.0)
   idx_price_high = df_price_fl["relative_ratio"].ge(1.0)
 
-  idx_price_low = df["key"].isin(df_price_fl[idx_price_low]["key"].values)
-  idx_price_high = df["key"].isin(df_price_fl[idx_price_high]["key"].values)
+  idx_price_low = df["key_sale"].isin(df_price_fl[idx_price_low]["key_sale"].values)
+  idx_price_high = df["key_sale"].isin(df_price_fl[idx_price_high]["key_sale"].values)
 
   idx_price_not_low = df_price_fl["med_dist_stdevs"].ge(-1.0)
   idx_price_not_high = df_price_fl["med_dist_stdevs"].le(1.0)
 
-  idx_price_not_low = df["key"].isin(df_price_fl[idx_price_not_low]["key"].values)
-  idx_price_not_high = df["key"].isin(df_price_fl[idx_price_not_high]["key"].values)
+  idx_price_not_low = df["key_sale"].isin(df_price_fl[idx_price_not_low]["key_sale"].values)
+  idx_price_not_high = df["key_sale"].isin(df_price_fl[idx_price_not_high]["key_sale"].values)
 
   idx_sqft_low = df_sqft_fl["med_dist_stdevs"].le(-2.0)
   idx_sqft_high = df_sqft_fl["med_dist_stdevs"].ge(2.0)
 
-  idx_sqft_low = df["key"].isin(df_sqft_fl[idx_sqft_low]["key"].values)
-  idx_sqft_high = df["key"].isin(df_sqft_fl[idx_sqft_high]["key"].values)
+  idx_sqft_low = df["key_sale"].isin(df_sqft_fl[idx_sqft_low]["key_sale"].values)
+  idx_sqft_high = df["key_sale"].isin(df_sqft_fl[idx_sqft_high]["key_sale"].values)
 
   idx_sqft_not_low = df_sqft_fl["med_dist_stdevs"].ge(-1.0)
   idx_sqft_not_high = df_sqft_fl["med_dist_stdevs"].le(1.0)
 
-  idx_sqft_not_low = df["key"].isin(df_sqft_fl[idx_sqft_not_low]["key"].values)
-  idx_sqft_not_high = df["key"].isin(df_sqft_fl[idx_sqft_not_high]["key"].values)
+  idx_sqft_not_low = df["key_sale"].isin(df_sqft_fl[idx_sqft_not_low]["key_sale"].values)
+  idx_sqft_not_high = df["key_sale"].isin(df_sqft_fl[idx_sqft_not_high]["key_sale"].values)
 
   idx_price_sqft_low = df_fl["relative_ratio"].le(1.0)
   idx_price_sqft_high = df_fl["relative_ratio"].ge(1.0)
 
-  idx_price_sqft_low = df["key"].isin(df_fl[idx_price_sqft_low]["key"].values)
-  idx_price_sqft_high = df["key"].isin(df_fl[idx_price_sqft_high]["key"].values)
+  idx_price_sqft_low = df["key_sale"].isin(df_fl[idx_price_sqft_low]["key_sale"].values)
+  idx_price_sqft_high = df["key_sale"].isin(df_fl[idx_price_sqft_high]["key_sale"].values)
 
   # Check for the five anomalies:
 

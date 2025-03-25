@@ -51,19 +51,21 @@ def tune_xgboost(X, y, sizes, he_ids, n_trials=100, n_splits=5, random_state=42,
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=n_trials, n_jobs=-1)
+    study.optimize(objective, n_trials=n_trials, n_jobs=-1, callbacks=[_plateau_callback])
     if verbose:
         print(f"Best trial: {study.best_trial.number} with MAE: {study.best_trial.value:10.0f} and params: {study.best_trial.params}")
     return study.best_params
 
 
-def tune_lightgbm(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False):
+def tune_lightgbm(X, y, sizes, he_ids, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False):
     """
     Tunes LightGBM hyperparameters using Optuna and rolling-origin cross-validation.
 
     Args:
         X (array-like): Feature matrix.
         y (array-like): Target vector.
+        sizes (array-like): Array of size values (land or building size)
+        he_ids (array-like): Array of horizontal equity cluster ID's
         n_trials (int): Number of optimization trials for Optuna. Default is 100.
         n_splits (int): Number of folds for cross-validation. Default is 5.
         random_state (int): Random seed for reproducibility. Default is 42.
@@ -106,20 +108,23 @@ def tune_lightgbm(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None
     # Run Bayesian Optimization with Optuna
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction="minimize", pruner=optuna.pruners.MedianPruner())
-    study.optimize(objective, n_trials=n_trials, n_jobs=-1)  # Use parallelism if available
+    study.optimize(objective, n_trials=n_trials, n_jobs=-1, callbacks=[_plateau_callback])  # Use parallelism if available
 
     if verbose:
         print(f"Best trial: {study.best_trial.number} with MAE: {study.best_trial.value:10.0f} and params: {study.best_trial.params}")
     return study.best_params
 
 
-def tune_catboost(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False):
+
+def tune_catboost(X, y, sizes, he_ids, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False):
     """
     Tunes CatBoost hyperparameters using Optuna and rolling-origin cross-validation.
 
     Args:
         X (array-like): Feature matrix.
         y (array-like): Target vector.
+        sizes (array-like): Array of size values (land or building size)
+        he_ids (array-like): Array of horizontal equity cluster ID's
         n_trials (int): Number of optimization trials for Optuna. Default is 100.
         n_splits (int): Number of folds for cross-validation. Default is 5.
         random_state (int): Random seed for reproducibility. Default is 42.
@@ -161,7 +166,7 @@ def tune_catboost(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None
 
     # Run Bayesian Optimization with Optuna
     study = optuna.create_study(direction="minimize", pruner=optuna.pruners.MedianPruner())
-    study.optimize(objective, n_trials=n_trials, n_jobs=-1)  # Use parallelism if available
+    study.optimize(objective, n_trials=n_trials, n_jobs=-1, callbacks=[_plateau_callback])  # Use parallelism if available
 
     if verbose:
         print(f"Best trial: {study.best_trial.number} with MAE: {study.best_trial.value:10.0f} and params: {study.best_trial.params}")
@@ -169,6 +174,34 @@ def tune_catboost(X, y, n_trials=100, n_splits=5, random_state=42, cat_vars=None
 
 
 ## PRIVATE:
+
+
+def _plateau_callback(study, trial):
+    """
+    Stops the study if no significant improvement (>= 1% over the current best value)
+    is observed over the last 20 trials.
+    """
+    plateau_trials = 20
+    improvement_threshold = 0.01  # require at least 1% improvement
+
+    # Only check if we've completed enough trials.
+    if trial.number < plateau_trials:
+        return
+
+    # Get the last plateau_trials trials.
+    recent_trials = study.trials[-plateau_trials:]
+    best_value = study.best_trial.value
+
+    # If none of the recent trials improved the best value by more than the threshold, stop the study.
+
+    # guard against null values in best_value:
+    if best_value is None:
+        return
+
+    if all(t.value is not None and t.value >= best_value * (1 + improvement_threshold) for t in recent_trials):
+        print("Plateau detected: no significant improvement in the last "
+              f"{plateau_trials} trials. Stopping study early.")
+        study.stop()
 
 
 def _xgb_custom_obj_variance_factory(size, cluster, alpha=0.1):
@@ -265,8 +298,9 @@ def _xgb_rolling_origin_cv(
 
         # If custom arrays are provided, subset them for training data and build custom objective
         custom_obj = None
-        if sizes is not None and he_ids is not None:
-            custom_obj = _xgb_custom_obj_variance_factory(size=sizes, cluster=he_ids, alpha=custom_alpha)
+        # TODO: enable this later
+        # if sizes is not None and he_ids is not None:
+        #     custom_obj = _xgb_custom_obj_variance_factory(size=sizes, cluster=he_ids, alpha=custom_alpha)
 
         # Train XGBoost
         model = xgb.train(

@@ -487,8 +487,13 @@ def geolocate_point_to_polygon(gdf: gpd.GeoDataFrame, df_in: pd.DataFrame, lat_f
   df.reset_index(drop=True)
   df["temp_index"] = df.index
 
+  gdf_keys = gdf[[parcel_id_field, "geometry"]]
+
+  # deduplicate:
+  gdf_keys = gdf_keys.drop_duplicates(subset=[parcel_id_field])
+
   # perform the spatial join, each lat/lon matched to the parcel it's inside of
-  gdf_joined = gpd.sjoin(df, gdf[[parcel_id_field, "geometry"]], how="left", predicate="within")
+  gdf_joined = gpd.sjoin(df, gdf_keys, how="left", predicate="within")
 
   # now we have a DataFrame that matches each row in df_in to a `parcel_id_field` in gdf
 
@@ -497,5 +502,7 @@ def geolocate_point_to_polygon(gdf: gpd.GeoDataFrame, df_in: pd.DataFrame, lat_f
 
   # drop the temporary index and the point geometry:
   df = df.drop(columns=["temp_index", "geometry"])
+
+  # now df has the parcel_id_field for each lat/lon pair in gdf
 
   return df

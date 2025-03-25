@@ -3,10 +3,10 @@ import pandas as pd
 from IPython.core.display_functions import display
 
 from openavmkit.data import _perform_canonical_split, _handle_duplicated_rows, _perform_ref_tables, _merge_dict_of_dfs, \
-	_do_enrich_year_built, enrich_time, SalesUniversePair, get_hydrated_sales_from_sup
+	_do_enrich_year_built, enrich_time, SalesUniversePair, get_hydrated_sales_from_sup, _do_perform_spatial_inference
 from openavmkit.modeling import DataSplit
 from openavmkit.utilities.assertions import dfs_are_equal
-from openavmkit.utilities.data import div_z_safe
+from openavmkit.utilities.data import div_z_safe, merge_and_stomp_dfs
 
 
 def test_div_z_safe():
@@ -17,7 +17,7 @@ def test_div_z_safe():
 	})
 	result = div_z_safe(df, "numerator", "denominator")
 	assert result.isna().sum() == 2
-	assert result.astype(str).eq(["nan","2.0","1.5","nan","1.25"]).all()
+	assert result.astype(str).eq(["<NA>","2.0","1.5","<NA>","1.25"]).all()
 
 
 def test_split_keys():
@@ -72,6 +72,7 @@ def test_split_keys():
 	df["sale_date"] = None
 	df.loc[df["valid_sale"].eq(True), "sale_date"] = "2025-01-01"
 	df["sale_date"] = pd.to_datetime(df["sale_date"])
+	df["key_sale"] = df["key"].astype(str) + "-" + df["sale_date"].astype(str)
 	df["sale_year"] = None
 	df["sale_month"] = None
 	df["sale_day"] = None
@@ -85,8 +86,8 @@ def test_split_keys():
 
 	df_test, df_train = _perform_canonical_split("residential_sf", df_sales,{}, test_train_fraction=0.8)
 
-	test_keys = df_test["key"].tolist()
-	train_keys = df_train["key"].tolist()
+	test_keys = df_test["key_sale"].tolist()
+	train_keys = df_train["key_sale"].tolist()
 
 	count_vacant = len(df_sales[df_sales["is_vacant"].eq(True)])
 	count_improved = len(df_sales[df_sales["is_vacant"].eq(False)])
@@ -489,3 +490,103 @@ def test_get_sales_from_sup():
 	df_expected = pd.DataFrame(data=data_expected)
 
 	assert dfs_are_equal(df_sales_hydrated, df_expected, primary_key="key")
+
+
+def test_merge_and_stomp_dfs():
+	data_1 = {
+		"key": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+		"fruit": ["apple", "banana", "cherry", "date", "elderberry", None, None, None, None, None],
+		"color": [None, "yellow", "red", "brown", "purple", "green", "purple", "green", "brown", "yellow"]
+	}
+
+	data_2 = {
+		"key": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+		"fruit": ["APPLE", "BANANA", "CHERRY", "DATE", "ELDERBERRY", "FIG", "GRAPE", "HONEYDEW", "KIWI", "LEMON"],
+		"color": ["RED", "YELLOW", "RED", "BROWN", "PURPLE", "GREEN", "PURPLE", "GREEN", "BROWN", "YELLOW"]
+	}
+
+	data_3 = {
+		"key": ["0", "1", "2", "3"],
+		"fruit": ["grape", "graper", "grapest", "graperlative"],
+		"color": ["purple", "purpler", "purplest", "purplerlative"]
+	}
+
+	df1 = pd.DataFrame(data=data_1)
+	df2 = pd.DataFrame(data=data_2)
+	df3 = pd.DataFrame(data=data_3)
+
+	expected_1 = {
+		"key": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+		"fruit": ["apple", "banana", "cherry", "date", "elderberry", "FIG", "GRAPE", "HONEYDEW", "KIWI", "LEMON"],
+		"color": ["RED", "yellow", "red", "brown", "purple", "green", "purple", "green", "brown", "yellow"]
+	}
+	expected_2 = {
+		"key": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+		"fruit": ["APPLE", "BANANA", "CHERRY", "DATE", "ELDERBERRY", "FIG", "GRAPE", "HONEYDEW", "KIWI", "LEMON"],
+		"color": ["RED", "YELLOW", "RED", "BROWN", "PURPLE", "GREEN", "PURPLE", "GREEN", "BROWN", "YELLOW"]
+	}
+	expected_3 = {
+		"key": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+		"fruit": ["apple", "banana", "cherry", "date", "elderberry", None, None, None, None, None],
+		"color": ["purple", "yellow", "red", "brown", "purple", "green", "purple", "green", "brown", "yellow"]
+	}
+	expected_4 = {
+		"key": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+		"fruit": ["grape", "graper", "grapest", "graperlative", "elderberry", None, None, None, None, None],
+		"color": ["purple", "purpler", "purplest", "purplerlative", "purple", "green", "purple", "green", "brown", "yellow"]
+	}
+	expected1 = pd.DataFrame(data=expected_1)
+	expected2 = pd.DataFrame(data=expected_2)
+	expected3 = pd.DataFrame(data=expected_3)
+	expected4 = pd.DataFrame(data=expected_4)
+
+	merged1 = merge_and_stomp_dfs(df1, df2, df2_stomps=False)
+	merged2 = merge_and_stomp_dfs(df1, df2, df2_stomps=True)
+	merged3 = merge_and_stomp_dfs(df1, df3, df2_stomps=False)
+	merged4 = merge_and_stomp_dfs(df1, df3, df2_stomps=True)
+
+	assert dfs_are_equal(merged1, expected1, primary_key="key")
+	assert dfs_are_equal(merged2, expected2, primary_key="key")
+	assert dfs_are_equal(merged3, expected3, primary_key="key")
+	assert dfs_are_equal(merged4, expected4, primary_key="key")
+
+
+def test_spatial_inference():
+
+	from IPython.core.display import display
+
+	data = {
+		"key":  ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"],
+		"zone": ["R", "R", "R", "R", "R", "R", "R", "R", "C", "C", "C", "C", "C", "C", "C", "C", "X", "X", "R", "R"],
+		"quad": ["A", "A", "A", "A", "B", "B", "B", "B", "C", "C", "C", "C", "D", "D", "D", "D", "x", "x", "?", "?"],
+		"hood": ["a", "a", "a", "a", "b", "b", "c", "c", "c", "d", "d", "d", "d", "e", "e", "e", "x", "x", "?", "?"],
+		"size": [  1,  1, None,   1,   2,None,   5,None,  10,None,    5,None,   5,   6,  6, None, None, None, None, None],
+		"land": [  2,None,   2,None,   4,   4,   5,None,None,   8, None,None,  10,  12,None,  12, None, None, None, None],
+		"foot": [ .5, .5,   .5,  .5,   2,None, 2.5, 2.5,   5,   4,  2.5, 2.5, 2.5,   3,  3,    3, None, None, None, None],
+		"true": [  1,  1,    1,   1,   2,   2,   5,   5,  10,   4,    5,   5,   5,   6,  6,    6,   12,   12,    1,    1]
+	}
+
+	df = pd.DataFrame(data=data)
+
+	s_infer = {
+		"filters": ["notin", "hood", ["x"]],
+		"proxies": ["land", "foot"],
+		"locations": ["hood", "quad"],
+		"group_by": ["zone"]
+	}
+
+	df_expected = df.copy()
+	df_expected = df_expected[df_expected["hood"].ne("x")]
+	df_expected["size"] = df_expected["true"]
+	df_expected["size_inferred"] = [False, False, True, False, False, True, False, True, False, True, False, True, False, False, False, True, True, True]
+	df_expected = df_expected.reset_index(drop=True)
+
+	df = _do_perform_spatial_inference(df, s_infer, "size", "key", verbose=True)
+
+	display(df)
+	df["size"] = df["size"].astype("Int64")
+	print("")
+	display(df_expected)
+
+	assert dfs_are_equal(df, df_expected, primary_key="key")
+

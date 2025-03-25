@@ -14,7 +14,7 @@ from shapely.ops import unary_union
 
 from openavmkit.calculations import _crawl_calc_dict_for_fields, perform_calculations
 from openavmkit.filters import resolve_filter, select_filter
-from openavmkit.utilities.data import combine_dfs, div_field_z_safe
+from openavmkit.utilities.data import combine_dfs, div_field_z_safe, merge_and_stomp_dfs
 from openavmkit.utilities.geometry import get_crs, clean_geometry, identify_irregular_parcels, get_exterior_coords, \
 	geolocate_point_to_polygon
 from openavmkit.utilities.settings import get_fields_categorical, get_fields_impr, get_fields_boolean, \
@@ -78,8 +78,6 @@ class SalesUniversePair:
       - Reduced to the correct selection of keys.
       - Addition of the newly generated fields.
 
-    TODO: add support for "key_sale".
-
     :param new_sales: New sales DataFrame with updates.
     :type new_sales: pd.DataFrame
     :returns: None
@@ -87,10 +85,18 @@ class SalesUniversePair:
 		old_fields = self.sales.columns.values
 		univ_fields = [field for field in self.universe.columns.values if field not in old_fields]
 		new_fields = [field for field in new_sales.columns.values if field not in old_fields and field not in univ_fields]
-		return_keys = new_sales["key"].values
+		return_keys = new_sales["key_sale"].values
 		reconciled = new_sales.copy()
-		reconciled = reconciled[reconciled["key"].isin(return_keys)]
-		reconciled = combine_dfs(reconciled, new_sales[["key"] + new_fields])
+		reconciled = reconciled[reconciled["key_sale"].isin(return_keys)]
+		reconciled = combine_dfs(reconciled, new_sales[["key_sale"] + new_fields], index="key_sale")
+
+		old_sales = self.sales.copy()
+		return_keys = new_sales["key_sale"].values
+		if len(return_keys) > len(old_sales):
+			raise ValueError("The new sales DataFrame contains more keys than the old sales DataFrame. update_sales() may only be used to shrink the dataframe or keep it the same size. Use set() if you intend to replace the sales dataframe.")
+
+		old_sales = old_sales[old_sales["key_sale"].isin(return_keys)].reset_index(drop=True)
+		reconciled = combine_dfs(old_sales, new_sales[["key_sale"] + new_fields].copy().reset_index(drop=True), index="key_sale")
 		self.sales = reconciled
 
 
@@ -115,8 +121,9 @@ def get_hydrated_sales_from_sup(sup: SalesUniversePair):
   :rtype: pd.DataFrame or gpd.GeoDataFrame
   """
 	df_sales = sup["sales"]
-	df_univ = sup["universe"]
-	df_merged = combine_dfs(df_sales, df_univ, False, index="key")
+	df_univ = sup["universe"].copy()
+	df_univ = df_univ[df_univ["key"].isin(df_sales["key"].values)].reset_index(drop=True)
+	df_merged = merge_and_stomp_dfs(df_sales, df_univ, df2_stomps=False)
 
 	if "geometry" in df_merged and "geometry" not in df_sales:
 		# convert df_merged to geodataframe:
@@ -196,6 +203,14 @@ def simulate_removed_buildings(df: pd.DataFrame, settings: dict, idx_vacant: Ser
 	for field in fields_impr_bool:
 		df.loc[idx_vacant, field] = False
 
+	# just to be safe, ensure that the "bldg_area_finished_sqft" field is set to 0 for vacant sales
+	# and update "is_vacant" to perfectly match
+	# TODO: if we add support for a user having a custom vacancy filter, we will need to adjust this
+	if "bldg_area_finished_sqft" in df:
+		df.loc[idx_vacant, "bldg_area_finished_sqft"] = 0
+		df["is_vacant"] = False
+		df.loc[idx_vacant, "is_vacant"] = True
+
 	return df
 
 
@@ -237,6 +252,17 @@ def get_vacant_sales(df_in: pd.DataFrame, settings: dict, invert: bool = False) 
 	return df_vacant_sales
 
 
+def is_series_all_bools(series: pd.Series) -> bool:
+	dtype = series.dtype
+	if dtype == bool:
+		return True
+	# check all unique values:
+	uniques = series.unique()
+	for unique in uniques:
+		if type(unique) != bool:
+			return False
+	return True
+
 def get_vacant(df_in: pd.DataFrame, settings: dict, invert: bool = False) -> pd.DataFrame:
 	"""
   Filter the DataFrame based on the 'is_vacant' column.
@@ -262,7 +288,7 @@ def get_vacant(df_in: pd.DataFrame, settings: dict, invert: bool = False) -> pd.
 	return df_vacant
 
 
-def get_sales(df_in: pd.DataFrame, settings: dict, vacant_only: bool = False) -> pd.DataFrame:
+def get_sales(df_in: pd.DataFrame, settings: dict, vacant_only: bool = False, df_univ: pd.DataFrame = None) -> pd.DataFrame:
 	"""
   Retrieve valid sales from the input DataFrame. Also simulates removed buildings if applicable.
 
@@ -282,18 +308,32 @@ def get_sales(df_in: pd.DataFrame, settings: dict, vacant_only: bool = False) ->
 	df = df_in.copy()
 	valid_sale_dtype = df["valid_sale"].dtype
 	if valid_sale_dtype != bool:
-		raise ValueError(f"The 'valid_sale' column must be a boolean type (found: {valid_sale_dtype})")
+		if is_series_all_bools(df["valid_sale"]):
+			df["valid_sale"] = df["valid_sale"].astype(bool)
+		else:
+			raise ValueError(f"The 'valid_sale' column must be a boolean type (found: {valid_sale_dtype}) with values: {df['valid_sale'].unique()}")
 
 	if "vacant_sale" in df:
 		vacant_sale_dtype = df["vacant_sale"].dtype
 		if vacant_sale_dtype != bool:
-			raise ValueError(f"The 'vacant_sale' column must be a boolean type (found: {vacant_sale_dtype})")
+			if is_series_all_bools(df["vacant_sale"]):
+				df["vacant_sale"] = df["vacant_sale"].astype(bool)
+			else:
+				raise ValueError(f"The 'vacant_sale' column must be a boolean type (found: {vacant_sale_dtype}) with values: {df['vacant_sale'].unique()}")
 		# check for vacant sales:
 		idx_vacant_sale = df["vacant_sale"].eq(True)
 
 		# simulate removed buildings for vacant sales
 		# (if we KNOW it was a vacant sale, then the building characteristics have to go)
 		df = simulate_removed_buildings(df, settings, idx_vacant_sale)
+
+		# TODO: smell
+		if "is_vacant" not in df and df_univ is not None:
+			df = df.merge(df_univ[["key", "is_vacant"]], on="key", how="left")
+
+		if "model_group" not in df and df_univ is not None:
+			df = df.merge(df_univ[["key", "model_group"]], on="key", how="left")
+
 		# if a property was NOT vacant at time of sale, but is vacant now, then the sale is invalid:
 		idx_is_vacant = df["is_vacant"].eq(True)
 		df.loc[~idx_vacant_sale & idx_is_vacant, "valid_sale"] = False
@@ -476,7 +516,15 @@ def process_data(dataframes: dict[str, pd.DataFrame], settings: dict, verbose: b
 	df_sales = df_sales[df_sales["valid_sale"].eq(True)].copy().reset_index(drop=True)
 
 	sup: SalesUniversePair = SalesUniversePair(universe=df_univ, sales=df_sales)
-	enrich_data(sup, s_process.get("enrich", {}), dataframes, settings, verbose=verbose)
+
+	sup = enrich_data(sup, s_process.get("enrich", {}), dataframes, settings, verbose=verbose)
+
+	dupe_univ: dict|None = s_process.get("dupes", {}).get("universe", None)
+	dupe_sales: dict|None = s_process.get("dupes", {}).get("sales", None)
+	if dupe_univ:
+		sup.set("universe", _handle_duplicated_rows(sup.universe, dupe_univ, verbose=verbose))
+	if dupe_sales:
+		sup.set("sales", _handle_duplicated_rows(sup.sales, dupe_sales, verbose=verbose))
 
 	return sup
 
@@ -523,12 +571,20 @@ def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str, pd
 	for supkey in supkeys:
 		if verbose:
 			print(f"Enriching {supkey}...")
-		df = sup[supkey]
+
+		df = sup.sales if supkey == "sales" else sup.universe
+
 		s_enrich_local: dict | None = s_enrich.get(supkey, None)
+
+		# stuff to enrich whether the user has settings or not
+		df = _enrich_vacant(df)
+
 		if s_enrich_local is not None:
-			df = _enrich_df_geometry(df, s_enrich_local, dataframes, settings, verbose=verbose)
+			df = _enrich_df_geometry(df, s_enrich_local, dataframes, settings, supkey == "sales", verbose=verbose)
 			df = _enrich_df_basic(df, s_enrich_local, dataframes, settings, supkey == "sales", verbose=verbose)
-			sup.set(supkey, df)
+
+		sup.set(supkey, df)
+
 	return sup
 
 
@@ -756,9 +812,6 @@ def _enrich_df_basic(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: dict[
 	# enrich year built:
 	df = _enrich_year_built(df, settings, is_sales)
 
-	# enrich vacant:
-	df = _enrich_vacant(df)
-
 	return df
 
 
@@ -800,15 +853,19 @@ def _enrich_vacant(df_in: pd.DataFrame) -> pd.DataFrame:
   :returns: DataFrame with an added 'is_vacant' column.
   :rtype: pandas.DataFrame
   """
-	df = df_in.copy()
-	df["is_vacant"] = False
-	df.loc[pd.isna(df["bldg_area_finished_sqft"]), "bldg_area_finished_sqft"] = 0
-	df.loc[df["bldg_area_finished_sqft"].eq(0), "is_vacant"] = True
-	# TODO: handle special case of sales, where "vacant_sale" and "is_vacant" don't line up.
+
+	if "bldg_area_finished_sqft" in df_in:
+		df = df_in.copy()
+		df["is_vacant"] = False
+		df.loc[pd.isna(df["bldg_area_finished_sqft"]), "bldg_area_finished_sqft"] = 0
+		df.loc[df["bldg_area_finished_sqft"].eq(0), "is_vacant"] = True
+	else:
+		df = df_in
+
 	return df
 
 
-def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: dict[str, pd.DataFrame], settings: dict, verbose: bool = False) -> gpd.GeoDataFrame:
+def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: dict[str, pd.DataFrame], settings: dict, is_sales: bool, verbose: bool = False) -> gpd.GeoDataFrame:
 	"""
   Enrich a DataFrame with spatial information using spatial joins and distance calculations.
 
@@ -820,6 +877,8 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
   :type dataframes: dict[str, pd.DataFrame]
   :param settings: Settings dictionary.
   :type settings: dict
+  :param is_sales: If True, indicates sales data.
+  :type is_sales: bool
   :param verbose: If True, prints progress.
   :type verbose: bool, optional
   :returns: A GeoDataFrame enriched with spatial information.
@@ -828,6 +887,7 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
 	df = df_in.copy()
 	s_geom = s_enrich_this.get("geometry", [])
 	s_dist = s_enrich_this.get("distances", {})
+	s_infer = s_enrich_this.get("infer", {})
 
 	gdf: gpd.GeoDataFrame
 
@@ -836,6 +896,8 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
 
 	# distances
 	gdf = _perform_distance_calculations(gdf, s_dist, dataframes, get_long_distance_unit(settings), verbose=verbose)
+
+	# TODO: gotta watch out for the universe/sales distinction here, probably should just only ever run this on universe?
 
 	# Merge everything together:
 	try_keys = ["key", "key2", "key3"]
@@ -856,6 +918,11 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
 	if not success:
 		raise ValueError(f"Could not find a common key between geo_parcels and base dataframe. Tried keys: {try_keys}")
 	gdf_merged = _basic_geo_enrichment(gdf_merged, settings, verbose=verbose)
+
+	# spatially infer missing
+	if not is_sales:
+		gdf_merged = _perform_spatial_inference(gdf_merged, s_infer, "key", verbose=verbose)
+
 	return gdf_merged
 
 
@@ -1052,6 +1119,112 @@ def _perform_spatial_join(gdf_in: gpd.GeoDataFrame, gdf_overlay: gpd.GeoDataFram
 	gdf.set_geometry("geometry", inplace=True)
 	gdf = gdf.drop(columns=["geometry_centroid", "__overlay_id__"], errors="ignore")
 	return gdf
+
+
+
+def _perform_spatial_inference(df_in: gpd.GeoDataFrame, s_infer: dict, key: str, verbose: bool = False) -> gpd.GeoDataFrame:
+	df = df_in.copy()
+	for field in s_infer:
+		entry = s_infer[field]
+		df = _do_perform_spatial_inference(df, entry, field, key, verbose=verbose)
+	return df
+
+
+def _do_perform_spatial_inference(df_in: pd.DataFrame,  s_infer_entry: dict, field: str, key: str, verbose: bool = False):
+
+	if verbose:
+		print(f"Performing spatial inference on field {field}...")
+
+	filters = s_infer_entry.get("filters", None)
+	df = df_in.copy()
+	df.loc[df[field].le(0), field] = None
+	if (filters is not None) and isinstance(filters, list):
+		if len(filters) > 0:
+			df = select_filter(df, filters)
+	else:
+		warnings.warn("No 'filters' found in data.process.enrich.<target>.infer, scope will be global -- make sure this is what you really want")
+
+	print(f"--> selected {len(df)} rows to infer upon")
+
+	proxies = s_infer_entry.get("proxies", [])
+	if not isinstance(proxies, list) or len(proxies) == 0:
+		raise ValueError("No 'proxies' found in data.process.enrich.<target>.infer")
+
+	locations = s_infer_entry.get("locations", [])
+	if isinstance(locations, str):
+		locations = [locations]
+	if not isinstance(locations, list) or len(locations) == 0:
+		raise ValueError("No 'locations' found in data.process.enrich.<target>.infer")
+
+	locations.append("___everything___")
+	df["___everything___"] = "1"
+
+	group_by = s_infer_entry.get("group_by", None)
+	if isinstance(group_by, str):
+		group_by = [group_by]
+	if not isinstance(group_by, list) or len(group_by) == 0:
+		warnings.warn("No 'group_by' found in data.process.enrich.<target>.infer, scope will be global.")
+
+	print(f"--> proxies = {proxies}")
+	print(f"--> locations = {locations}")
+	print(f"--> group_by = {group_by}")
+
+	#pd.set_option('display.max_columns', None)
+	#from IPython.core.display import display
+
+	proxy_fields = []
+	for proxy in proxies:
+		proxy_field = f"__proxy__{proxy}"
+		#display(df.columns.values)
+		df[proxy_field] = div_field_z_safe(df[field], df[proxy])
+		proxy_fields.append(proxy_field)
+
+		print(f"----> proxy {proxy_field}")
+		print(df[proxy_field].describe())
+
+	df["___proxy___"] = None
+
+	for location in locations:
+
+		group_list = group_by.copy()
+
+		group_list.append(location)
+
+		df_group = df.groupby(group_list)
+		df_agg = df_group[proxy_fields].agg("median").reset_index()
+
+		print(f"----> location {location}")
+
+		group_list_key = "_".join(group_list)
+		df_agg[group_list_key] = df_agg[group_list].apply(lambda x: "_".join(x.astype(str)), axis=1)
+		df_agg.drop(columns=group_list, inplace=True)
+		df[group_list_key] = df[group_list].apply(lambda x: "_".join(x.astype(str)), axis=1)
+
+		for proxy in proxies:
+			proxy_field = f"__proxy__{proxy}"
+			df = merge_and_stomp_dfs(df, df_agg, on=group_list_key)
+			# Calculate the proxy value (e.g. building size) from the proxy field (e.g. building size per footprint unit) and the proxy (e.g. footprint unit)
+			df.loc[df["___proxy___"].isna(), "___proxy___"] = df[proxy_field] * df[proxy]
+
+		df = df.drop(columns=[group_list_key], errors="ignore")
+
+	empty_index = df[field].isna()
+
+	if verbose:
+		empty_values = len(df[df[field].isna()])
+		proxy_values = len(df[df[field].isna() & ~df["___proxy___"].isna()])
+		print(f"--> {empty_values} empty values in {field} were filled with {proxy_values} proxy-estimated values")
+
+	df.loc[df[field].isna(), field] = df["___proxy___"]
+	df = df.drop(columns=["___proxy___", "___everything___"], errors="ignore")
+	for proxy_field in proxy_fields:
+		df = df.drop(columns=[proxy_field], errors="ignore")
+
+	# Mark rows as inferred
+	df[f"{field}_inferred"] = False
+	df.loc[empty_index, f"{field}_inferred"] = True
+
+	return df
 
 
 def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDataFrame, _id: str, unit: str = "km") -> pd.DataFrame:
@@ -1307,12 +1480,16 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
 		is_geometry = True
 
 	if ext == "parquet":
-		if dtype_map:
-			warnings.warn("dtypes are ignored when loading parquet files.")
 		try:
 			df = gpd.read_parquet(filename, columns=cols_to_load)
 		except ValueError:
 			df = pd.read_parquet(filename, columns=cols_to_load)
+
+		# Enforce user's dtypes
+		for col in df.columns:
+			if col in dtype_map:
+				df[col] = df[col].astype(dtype_map[col])
+
 	elif ext == "csv":
 		df = pd.read_csv(filename, usecols=cols_to_load, dtype=dtype_map)
 	else:
@@ -1397,7 +1574,7 @@ def _snoop_column_names(filename: str) -> list[str]:
 	raise ValueError(f"Unsupported file extension: \"{ext}\"")
 
 
-def _handle_duplicated_rows(df_in: pd.DataFrame, dupes: dict) -> pd.DataFrame:
+def _handle_duplicated_rows(df_in: pd.DataFrame, dupes: str|dict, verbose: bool = False) -> pd.DataFrame:
 	"""
   Handle duplicated rows in a DataFrame based on specified rules.
 
@@ -1405,9 +1582,13 @@ def _handle_duplicated_rows(df_in: pd.DataFrame, dupes: dict) -> pd.DataFrame:
   :type df_in: pandas.DataFrame
   :param dupes: Dictionary specifying duplicate handling instructions.
   :type dupes: dict
+  :param verbose: If True, prints information.
+  :type verbose: bool, optional
   :returns: DataFrame with duplicates handled.
   :rtype: pandas.DataFrame
   """
+	if dupes == "allow":
+		return df_in
 	subset = dupes.get("subset", "key")
 	if not isinstance(subset, list):
 		subset = [subset]
@@ -1416,6 +1597,7 @@ def _handle_duplicated_rows(df_in: pd.DataFrame, dupes: dict) -> pd.DataFrame:
 			return df_in
 	do_drop = dupes.get("drop", True)
 	num_dupes = df_in.duplicated(subset=subset).sum()
+	orig_len = len(df_in)
 	if num_dupes > 0:
 		sort_by = dupes.get("sort_by", ["key", "asc"])
 		if not isinstance(sort_by, list):
@@ -1436,7 +1618,13 @@ def _handle_duplicated_rows(df_in: pd.DataFrame, dupes: dict) -> pd.DataFrame:
 		ascendings = [x[1] == "asc" for x in sort_by]
 		df = df.sort_values(by=bys, ascending=ascendings)
 		if do_drop:
-			df = df.drop_duplicates(subset=subset, keep="first")
+			if do_drop == "all":
+				df = df.drop_duplicates(subset=subset, keep=False)
+			else:
+				df = df.drop_duplicates(subset=subset, keep="first")
+			final_len = len(df)
+			if verbose:
+				print(f"Dropped {orig_len - final_len} duplicate rows based on '{subset}'")
 		return df.reset_index(drop=True)
 	return df_in
 
@@ -1463,6 +1651,9 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 		df_id = None
 		how = "left"
 		on = "key"
+
+		payload = {}
+
 		if isinstance(entry, str):
 			if entry not in dataframes:
 				raise ValueError(f"Merge key '{entry}' not found in dataframes.")
@@ -1471,20 +1662,25 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 			df_id = entry.get("id", None)
 			how = entry.get("how", how)
 			on = entry.get("on", on)
+			for key in entry:
+				if key not in ["id", "df", "how", "on"]:
+					payload[key] = entry[key]
 		if df_id is None:
 			raise ValueError("Merge entry must be either a string or a dictionary with an 'id' key.")
 		if df_id not in dataframes:
 			raise ValueError(f"Merge key '{df_id}' not found in dataframes.")
-		merges.append({
-			"id": df_id,
-			"df": dataframes[df_id],
-			"how": how,
-			"on": on
-		})
+
+		payload["id"] = df_id
+		payload["df"] = dataframes[df_id]
+		payload["how"] = how
+		payload["on"] = on
+
+		merges.append(payload)
 
 	df_merged: pd.DataFrame | None = None
 	all_cols = []
 	conflicts = {}
+	all_suffixes = []
 
 	# Generate suffixes and note conflicts, which we'll resolve further down
 	for merge in merges:
@@ -1502,6 +1698,7 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 				if col not in conflicts:
 					conflicts[col] = []
 				conflicts[col].append(suffixed)
+				all_suffixes.append(suffixed)
 		df = df.rename(columns=suffixes)
 		merge["df"] = df
 
@@ -1511,6 +1708,8 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 		df = merge.get("df", None)
 		how = merge.get("how", "left")
 		on = merge.get("on", "key")
+		dupes = merge.get("dupes", None)
+
 		if df_merged is None:
 			df_merged = df
 		elif how == "append":
@@ -1524,9 +1723,28 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 				raise ValueError("No 'latitude' field found in dataframe being merged with 'lat_long'")
 			if "longitude" not in df.columns:
 				raise ValueError("No 'longitude' field found in dataframe being merged with 'lat_long'")
-			df_merged = geolocate_point_to_polygon(df_merged, df, lat_field="latitude", lon_field="longitude", parcel_id_field=on)
+			# use geolocation to get the right keys
+			df_with_key = geolocate_point_to_polygon(df_merged, df, lat_field="latitude", lon_field="longitude", parcel_id_field=on)
+
+			# de-duplicate
+			dupe_rows = df_with_key[df_with_key.duplicated(subset=[on], keep=False)]
+			if len(dupe_rows) > 0:
+				if dupes is None:
+					raise ValueError(f"Found {len(dupe_rows)} duplicates in geolocation merge '{_id}' on field '{on}'. But, you have no 'dupes' policy to deal with them. If you're okay with duplicates (such as in a sales dataset), set dupes='allow' in the merge instructions.")
+				df_with_key = _handle_duplicated_rows(df_with_key, dupes, verbose=True)
+
+			# merge the dataframes the conventional way
+			df_merged = pd.merge(df_merged, df_with_key, how="left", on=on, suffixes=("", f"_{_id}"))
 		else:
 			df_merged = pd.merge(df_merged, df, how=how, on=on, suffixes=("", f"_{_id}"))
+
+		# General case de-duplication
+		if on in df_merged:
+			dupe_rows = df_merged[df_merged.duplicated(subset=[on], keep=False)]
+			if len(dupe_rows) > 0:
+				if dupes is None:
+					raise ValueError(f"Found {len(dupe_rows)} duplicates in geolocation merge id='{_id}' how='{how}' on='{on}'. But, you have no 'dupes' policy to deal with them. If you're okay with duplicates (such as in a sales dataset), set dupes='allow' in the merge instructions.")
+				df_merged = _handle_duplicated_rows(df_merged, dupes, verbose=True)
 
 	# Reconcile conflicts
 	for base_field in s_reconcile:
@@ -1541,14 +1759,21 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 		conflicts[base_field] = child_fields
 	for base_field in conflicts:
 		if base_field not in df_merged:
-			warnings.warn(f"Warning: Reconciliation field '{base_field}' not found in merged dataframe.")
+			warnings.warn(f"Reconciliation field '{base_field}' not found in merged dataframe.")
 			continue
 		child_fields = conflicts[base_field]
 		if len(child_fields) > 1:
+			#TODO: remove this when this becomes default pandas behavior
+			old_value = pd.get_option('future.no_silent_downcasting')
+			pd.set_option('future.no_silent_downcasting', True)
+
 			df_merged[base_field] = df_merged[base_field].fillna(df_merged[child_fields[0]])
 			for i in range(1, len(child_fields)):
 				df_merged[base_field] = df_merged[base_field].fillna(df_merged[child_fields[i]])
 			df_merged = df_merged.drop(columns=child_fields)
+
+			#TODO: remove this when this becomes default pandas behavior
+			pd.set_option('future.no_silent_downcasting', old_value)
 
 	# Remove columns used as INGREDIENTS in calculations, but which the user never intends to load directly
 	calc_cols = _get_calc_cols(settings, exclude_loaded_fields=True)
@@ -1565,23 +1790,28 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 	if len_new < len_old:
 		warnings.warn(f"Dropped {len_old - len_new} rows due to missing primary key.")
 
+	all_suffixes = [col for col in all_suffixes if col in df_merged]
+	df_merged = df_merged.drop(columns=all_suffixes)
+
 	# ensure a clean index:
 	df_merged = df_merged.reset_index(drop=True)
 
 	return df_merged
 
 
-def _write_canonical_splits(df_sales_in: pd.DataFrame, settings: dict):
+def _write_canonical_splits(sup: SalesUniversePair, settings: dict):
 	"""
   Write canonical split keys for sales data to disk.
 
-  :param df_sales_in: Input sales DataFrame.
-  :type df_sales_in: pandas.DataFrame
+	:param sup: SalesUniversePair containing sales and universe DataFrames.
+	:type sup: SalesUniversePair
   :param settings: Settings dictionary.
   :type settings: dict
   :returns: None
   """
-	df_sales = get_sales(df_sales_in, settings)
+	df_sales_in = sup.sales
+	df_univ = sup.universe
+	df_sales = get_sales(df_sales_in, settings, df_univ=df_univ)
 	model_groups = get_model_group_ids(settings, df_sales)
 	instructions = settings.get("modeling", {}).get("instructions", {})
 	test_train_frac = instructions.get("test_train_frac", 0.8)
@@ -1639,8 +1869,8 @@ def _do_write_canonical_split(model_group: str, df_sales_in: pd.DataFrame, setti
 	df_test, df_train = _perform_canonical_split(model_group, df_sales_in, settings, test_train_fraction, random_seed)
 	outpath = f"out/models/{model_group}/_data"
 	os.makedirs(outpath, exist_ok=True)
-	df_train[["key"]].to_csv(f"{outpath}/train_keys.csv", index=False)
-	df_test[["key"]].to_csv(f"{outpath}/test_keys.csv", index=False)
+	df_train[["key_sale"]].to_csv(f"{outpath}/train_keys.csv", index=False)
+	df_test[["key_sale"]].to_csv(f"{outpath}/test_keys.csv", index=False)
 
 
 def _read_split_keys(model_group: str):
@@ -1658,8 +1888,8 @@ def _read_split_keys(model_group: str):
 	test_path = f"{path}/test_keys.csv"
 	if not os.path.exists(train_path) or not os.path.exists(test_path):
 		raise ValueError("No split keys found.")
-	train_keys = pd.read_csv(train_path)["key"].astype(str).values
-	test_keys = pd.read_csv(test_path)["key"].astype(str).values
+	train_keys = pd.read_csv(train_path)["key_sale"].astype(str).values
+	test_keys = pd.read_csv(test_path)["key_sale"].astype(str).values
 	return test_keys, train_keys
 
 
@@ -1692,13 +1922,19 @@ def _tag_model_groups_sup(sup: SalesUniversePair, settings: dict, verbose: bool 
 
 	df_univ["model_group"] = None
 	df_sales_hydrated["model_group"] = None
+
 	for mg_id in mg:
 		# only apply model groups to parcels that don't already have one
 		idx_no_model_group = df_univ["model_group"].isnull()
 		entry = mg[mg_id]
 		_filter = entry.get("filter", [])
+
+		if len(_filter) == 0:
+			raise ValueError("No 'filter' entry found for model group '{mg_id}'. Check your spelling!")
+
 		univ_index = resolve_filter(df_univ, _filter)
 		df_univ.loc[idx_no_model_group & univ_index, "model_group"] = mg_id
+
 		idx_no_model_group = df_sales_hydrated["model_group"].isnull()
 		sales_index = resolve_filter(df_sales_hydrated, _filter)
 		df_sales_hydrated.loc[idx_no_model_group & sales_index, "model_group"] = mg_id

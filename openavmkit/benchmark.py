@@ -177,7 +177,13 @@ def get_variable_recommendations(
 	corr_results = calc_correlations(X_corr, thresh.get("correlation", 0.1))
 
 	# Elastic net regularization
-	enr_coefs = calc_elastic_net_regularization(X_sales, y_sales, thresh.get("enr", 0.01))
+	try:
+		enr_coefs = calc_elastic_net_regularization(X_sales, y_sales, thresh.get("enr", 0.01))
+	except ValueError as e:
+		nulls_in_X = X_sales[X_sales.isna().any(axis=1)]
+		print(f"Found {len(nulls_in_X)} rows with nulls in X:")
+		display(nulls_in_X)
+		raise e
 
 	# R² values
 	r2_values = calc_r2(ds.df_sales, ds.ind_vars, y_sales)
@@ -315,7 +321,8 @@ def run_models(
 		use_saved_results: bool = True,
 		verbose: bool = False,
 		run_main: bool = True,
-		run_vacant: bool = True
+		run_vacant: bool = True,
+		run_hedonic: bool = True
 ):
 	"""
   Runs predictive models on the given SalesUniversePair. This function takes detailed instructions from the provided
@@ -367,7 +374,7 @@ def run_models(
 				continue
 			if not vacant_only and not run_main:
 				continue
-			_run_models(sup, model_group, settings, vacant_only, save_params, use_saved_params, use_saved_results, verbose)
+			_run_models(sup, model_group, settings, vacant_only, save_params, use_saved_params, use_saved_results, verbose, run_hedonic)
 
 
 # Private functions:
@@ -867,9 +874,9 @@ def _assemble_model_results(results: SingleModelResults, settings: dict):
 	fields = [field for field in fields if field in results.df_sales.columns]
 
 	dfs = {
-		"sales": results.df_sales[fields].copy(),
+		"sales": results.df_sales[["key_sale"]+fields].copy(),
 		"universe": results.df_universe[fields].copy(),
-		"test": results.df_test[fields].copy()
+		"test": results.df_test[["key_sale"]+fields].copy()
 	}
 
 	if results.df_multiverse is not None:
@@ -962,10 +969,15 @@ def _write_ensemble_model_results(
 	path = f"{outpath}/{results.type}"
 	os.makedirs(path, exist_ok=True)
 	for key in dfs_basic:
+		prim_keys = ["key"]
+		merge_key = "key"
+		if key in ["sales", "test"]:
+			prim_keys.append("key_sale")
+			merge_key = "key_sale"
 		df_basic = dfs_basic[key]
 		df_ensemble = dfs[key]
-		df_ensemble = df_ensemble[["key"] + ensemble_list]
-		df = df_basic.merge(df_ensemble, on="key", how="left")
+		df_ensemble = df_ensemble[prim_keys + ensemble_list]
+		df = df_basic.merge(df_ensemble, on=merge_key, how="left")
 		df.to_parquet(f"{path}/pred_ensemble_{key}.parquet")
 		df.to_csv(f"{path}/pred_ensemble_{key}.csv", index=False)
 
@@ -1111,7 +1123,7 @@ def _optimize_ensemble_allocation_iteration(
   :returns: Tuple containing best score and best ensemble list.
   :rtype: tuple(float, list[str])
   """
-	df_test_ensemble = df_test[["key"]].copy()
+	df_test_ensemble = df_test[["key_sale", "key"]].copy()
 	df_univ_ensemble = df_univ[["key"]].copy()
 	if len(ensemble_list) == 0:
 		ensemble_list = [key for key in all_results.model_results.keys()]
@@ -1295,7 +1307,7 @@ def _optimize_ensemble_iteration(
 		ensemble_list: list[str],
 		verbose: bool = False
 ):
-	df_test_ensemble = df_test[["key"]].copy()
+	df_test_ensemble = df_test[["key_sale", "key"]].copy()
 	df_univ_ensemble = df_univ[["key"]].copy()
 	if len(ensemble_list) == 0:
 		ensemble_list = [key for key in all_results.model_results.keys()]
@@ -1437,8 +1449,8 @@ def _run_ensemble(
 	df_univ = ds.df_universe
 	df_multi = ds.df_multiverse
 
-	df_test_ensemble = df_test[["key"]].copy()
-	df_sales_ensemble = df_sales[["key"]].copy()
+	df_test_ensemble = df_test[["key_sale", "key"]].copy()
+	df_sales_ensemble = df_sales[["key_sale", "key"]].copy()
 	df_univ_ensemble = df_univ[["key"]].copy()
 
 	if df_multi is not None:
@@ -1455,14 +1467,14 @@ def _run_ensemble(
 	timing.start("train")
 	for m_key in ensemble_list:
 		m_results = all_results.model_results[m_key]
-		_df_test = m_results.df_test[["key"]].copy()
+		_df_test = m_results.df_test[["key_sale"]].copy()
 		_df_test.loc[:, m_key] = m_results.pred_test.y_pred
-		_df_sales = m_results.df_sales[["key"]].copy()
+		_df_sales = m_results.df_sales[["key_sale"]].copy()
 		_df_sales.loc[:, m_key] = m_results.pred_sales.y_pred
 		_df_univ = m_results.df_universe[["key"]].copy()
 		_df_univ.loc[:, m_key] = m_results.pred_univ
-		df_test_ensemble = df_test_ensemble.merge(_df_test, on="key", how="left")
-		df_sales_ensemble = df_sales_ensemble.merge(_df_sales, on="key", how="left")
+		df_test_ensemble = df_test_ensemble.merge(_df_test, on="key_sale", how="left")
+		df_sales_ensemble = df_sales_ensemble.merge(_df_sales, on="key_sale", how="left")
 		df_univ_ensemble = df_univ_ensemble.merge(_df_univ, on="key", how="left")
 		if df_multi is not None:
 			_df_multi = m_results.df_multiverse[["key"]].copy()
@@ -1991,7 +2003,8 @@ def _run_models(
 		save_params: bool = True,
 		use_saved_params: bool = True,
 		use_saved_results: bool = True,
-		verbose: bool = False
+		verbose: bool = False,
+		run_hedonic: bool = True
 ):
 	"""
   Run models for a given model group and process ensemble results.
@@ -2044,7 +2057,7 @@ def _run_models(
 	if not os.path.exists(outpath):
 		os.makedirs(outpath)
 
-	df_sales_count = get_sales(df_sales, settings, vacant_only)
+	df_sales_count = get_sales(df_sales, settings, vacant_only, df_univ)
 
 	if len(df_sales_count) == 0:
 		print(f"No sales records found for model_group: {model_group}, vacant_only: {vacant_only}. Skipping...")
@@ -2155,7 +2168,7 @@ def _run_models(
 		print(f"MAIN BENCHMARK")
 	print(all_results.benchmark.print())
 
-	if not vacant_only:
+	if not vacant_only and run_hedonic:
 		_run_hedonic_models(
 			settings=settings,
 			model_group=model_group,

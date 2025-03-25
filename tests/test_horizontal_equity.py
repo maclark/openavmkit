@@ -1,7 +1,9 @@
 from IPython.core.display_functions import display
 
 from openavmkit.data import SalesUniversePair, get_hydrated_sales_from_sup
-from openavmkit.horizontal_equity_study import make_clusters, mark_horizontal_equity_clusters
+from openavmkit.horizontal_equity_study import make_clusters, mark_horizontal_equity_clusters, \
+	mark_horizontal_equity_clusters_per_model_group_sup
+from openavmkit.pipeline import load_settings
 from openavmkit.synthetic.basic import generate_basic
 
 
@@ -10,7 +12,19 @@ def test_clusters():
 	sd = generate_basic(100)
 
 	sup = SalesUniversePair(sd.df_sales, sd.df_universe)
-	df = get_hydrated_sales_from_sup(sup)
+	sup.universe["model_group"] = "test"
 
-	df = mark_horizontal_equity_clusters(df, {})
+	settings = {
+		"modeling":{
+			"model_groups":{
+				"test":{}
+			}
+		}
+	}
+
+	settings = load_settings("", settings)
+
+	sup = mark_horizontal_equity_clusters_per_model_group_sup(sup, settings, verbose=verbose)
+	df = sup.universe
+
 	display(df["he_id"].value_counts())

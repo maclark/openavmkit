@@ -419,28 +419,96 @@ def _load_settings_template():
   return settings
 
 
+def is_key_in(object: dict, key: str):
+  flags = ["+", "!"]
+  for flag in ["+", "!", ""]:
+    if f"{flag}{key}" in object:
+      return True, flag
+  return False, ""
+
+
+def _strip_flags(settings: dict|list):
+  flags = ["+", "!"]
+
+  if isinstance(settings, list):
+    for i, item in enumerate(settings):
+      if isinstance(item, list) or isinstance(item, dict):
+        settings[i] = _strip_flags(item)
+    return settings
+
+  if isinstance(settings, dict):
+    keys_in_settings = [key for key in settings]
+
+    for key_ in keys_in_settings:
+      if key_ not in settings:
+        continue
+      entry = settings[key_]
+      key = key_
+      for flag in flags:
+        if key_.startswith(flag):
+          key = key_[1:]
+          settings[key] = settings[key_]
+          del settings[key_]
+      if isinstance(entry, dict):
+        entry = _strip_flags(entry)
+        settings[key] = entry
+      elif isinstance(entry, list):
+        for i, item in enumerate(entry):
+          if isinstance(item, list) or isinstance(item, dict):
+            entry[i] = _strip_flags(item)
+      settings[key] = entry
+  return settings
+
+
 def _merge_settings(template: dict, local: dict, indent:str= ""):
   # Start by copying the template
   merged = template.copy()
 
   # Iterate over keys of local:
-  for key in local:
-    entry_l = local[key]
+  for key_ in local:
+
+    key = key_
+    local_stomps = False
+    if key_.startswith("!"):
+      local_stomps = True
+      key = key_[1:]
+
+    entry_l = local[key_]
+
+    key_exists, flag = is_key_in(template, key)
+
     # If the key is in both template and local, reconcile them:
-    if key in template:
-      entry_t = template[key]
-      if isinstance(entry_t, dict) and isinstance(entry_l, dict):
-        # If both are dictionaries, merge them recursively:
-        merged[key] = _merge_settings(entry_t, entry_l, indent + "  ")
-      elif isinstance(entry_t, list) and isinstance(entry_l, list):
-        # If both are lists, add any new local items that aren't already in template:
-        # for item in entry_l:
-        #   if item not in entry_t:
-        #     entry_t.append(item)
+    if key_exists:
+      local_key = f"{flag}{key}"
+      add_template = False
+      if not local_stomps and flag == "+":
+        add_template = True
+
+      if local_stomps:
         merged[key] = entry_l
       else:
-        merged[key] = entry_l
+        entry_t = template[local_key]
+        if isinstance(entry_t, dict) and isinstance(entry_l, dict):
+          # If both are dictionaries, merge them recursively:
+          merged[key] = _merge_settings(entry_t, entry_l, indent + "  ")
+        elif isinstance(entry_t, list) and isinstance(entry_l, list):
+          if add_template:
+            # If both are lists, add any new local items that aren't already in template:
+            for item in entry_l:
+              if item not in entry_t:
+                entry_t.append(item)
+            merged[key] = entry_t
+          else:
+            merged[key] = entry_l
+        else:
+          merged[key] = entry_l
+
+      if flag != "" and local_key in merged:
+        del merged[local_key]
+
     else:
       merged[key] = entry_l
+
+  merged = _strip_flags(merged)
 
   return merged

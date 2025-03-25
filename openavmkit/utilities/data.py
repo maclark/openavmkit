@@ -84,6 +84,9 @@ def div_z_safe(df: pd.DataFrame, numerator: str, denominator: str):
   result[idx_denominator_zero] = None
 
   # Replace other values with the result of the division.
+
+  result = result.astype("Float64") # ensure it can accept the result
+
   result[~idx_denominator_zero] = series_numerator / series_denominator
   return result
 
@@ -123,7 +126,7 @@ def rename_dict(dict, renames):
   return new_dict
 
 
-def do_per_model_group(df_in: pd.DataFrame, settings: dict, func: callable, params: dict, verbose: bool = False) -> pd.DataFrame:
+def do_per_model_group(df_in: pd.DataFrame, settings: dict, func: callable, params: dict, key: str ="key", verbose: bool = False) -> pd.DataFrame:
   """
   Apply a function to each subset of the DataFrame grouped by 'model_group', updating rows based on matching indices.
 
@@ -135,6 +138,8 @@ def do_per_model_group(df_in: pd.DataFrame, settings: dict, func: callable, para
   :type func: callable
   :param params: Additional parameters for the function.
   :type params: dict
+  :param key: Column name to use as the index for alignment (default is "key").
+  :type key: str, optional
   :param verbose: If True, prints progress information (default is False).
   :type verbose: bool, optional
   :returns: Modified DataFrame with updates from the function.
@@ -163,11 +168,32 @@ def do_per_model_group(df_in: pd.DataFrame, settings: dict, func: callable, para
     if df_sub_updated is not None:
       # Ensure consistent data types between df and the updated subset.
       for col in df_sub_updated.columns:
-        if col == "key":
+        if col == key:
           continue
-        df = combine_dfs(df, df_sub_updated[["key", col]], df2_stomps=True)
+        df = combine_dfs(df, df_sub_updated[[key, col]], df2_stomps=True, index=key)
 
   return df
+
+
+def merge_and_stomp_dfs(df1: pd.DataFrame, df2: pd.DataFrame, df2_stomps=False, on: str|list = "key", how: str = "left") -> pd.DataFrame:
+
+  common_columns = [col for col in df1.columns if col in df2.columns]
+  df_merge = pd.merge(df1, df2, on=on, how=how, suffixes=("_1", "_2"))
+  suffixed_columns = [col + "_1" for col in common_columns] + [col + "_2" for col in common_columns]
+  suffixed_columns = [col for col in suffixed_columns if col in df_merge.columns]
+
+  for col in common_columns:
+    if col == on:
+      continue
+    if df2_stomps:
+      # prefer df2's column value everywhere df2 has a non-null value
+      df_merge[col] = df_merge[col + "_2"].combine_first(df_merge[col + "_1"])
+    else:
+      # prefer df1's column value everywhere df1 has a non-null value
+      df_merge[col] = df_merge[col + "_1"].combine_first(df_merge[col + "_2"])
+
+  df_merge.drop(columns=suffixed_columns, inplace=True)
+  return df_merge
 
 
 def combine_dfs(df1: pd.DataFrame, df2: pd.DataFrame, df2_stomps=False, index: str = "key") -> pd.DataFrame:

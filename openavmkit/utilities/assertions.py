@@ -74,12 +74,19 @@ def dfs_are_equal(a: pd.DataFrame, b: pd.DataFrame, primary_key=None):
 		a = a.sort_values(by=primary_key)
 		b = b.sort_values(by=primary_key)
 
+	# sort column names so they're in the same order:
+	a = a.reindex(sorted(a.columns), axis=1)
+	b = b.reindex(sorted(b.columns), axis=1)
+
 	# ensure that the two dataframes contain the same information:
 	if not a.columns.equals(b.columns):
 		print(f"Columns do not match:\nA={a.columns}\nB={b.columns}")
 		return False
 	if not a.index.equals(b.index):
 		print("Indices do not match")
+		print(a.index)
+		print("VS")
+		print(b.index)
 		return False
 	for col in a.columns:
 		if not series_are_equal(a[col], b[col]):
@@ -90,11 +97,11 @@ def dfs_are_equal(a: pd.DataFrame, b: pd.DataFrame, primary_key=None):
 			bad_rows_b = b[~a[col].eq(b[col])]
 
 			if len(bad_rows_a) == 0 and len(bad_rows_b) == 0:
-				print(f"Column {col} does not match even though rows are naively equal, look:")
+				print(f"Column '{col}' does not match even though rows are naively equal, look:")
 				print(a[col])
 				print(b[col])
 			else:
-				print(f"Column {col} does not match, look:")
+				print(f"Column '{col}' does not match, look:")
 				# print rows that are not equal:
 				print(bad_rows_a)
 				print(bad_rows_b)

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from openavmkit.data import SalesUniversePair, get_field_classifications
+from openavmkit.data import SalesUniversePair, get_field_classifications, is_series_all_bools
 from openavmkit.utilities.settings import get_valuation_date, get_fields_categorical, get_fields_boolean, \
 	get_grouped_fields_from_data_dictionary, get_data_dictionary, get_model_group_ids
 
@@ -19,10 +19,25 @@ def clean_valid_sales(sup: SalesUniversePair, settings : dict):
 
 	# temporarily merge in universe's vacancy status (how the parcel is now)
 	df_univ_vacant = df_univ[["key", "is_vacant"]].copy().rename(columns={"is_vacant": "univ_is_vacant"})
+
+	# check df_univ for duplicate keys:
+	if len(df_univ["key"].unique()) != len(df_univ):
+		print("WARNING: df_univ has duplicate keys, this will cause problems")
+		# print how many:
+		dupe_key_count = len(df_univ) - len(df_univ["key"].unique())
+		print(f"--> {dupe_key_count} rows with duplicate keys found")
+
+	print(f"Before univ merge len = {len(df_sales)}")
+
 	df_sales = df_sales.merge(df_univ_vacant, on="key", how="left")
+
+	print(f"After univ merge len = {len(df_sales)}")
 
 	# mark which sales are to be used (only those that are valid and within the specified time frame)
 	df_sales.loc[df_sales["sale_year"].lt(use_sales_from), "valid_sale"] = False
+
+	# drop all invalid sales:
+	df_sales = df_sales[df_sales["valid_sale"].eq(True)].copy()
 
 	# initialize these -- we want to further determine which valid sales are valid for ratio studies
 	df_sales["valid_for_ratio_study"] = False
@@ -74,6 +89,17 @@ def clean_valid_sales(sup: SalesUniversePair, settings : dict):
 	print(f"--> {len(df_sales[df_sales['valid_for_land_ratio_study'].eq(True)])} valid for land ratio study")
 
 	df_sales = df_sales.drop(columns=["univ_is_vacant"])
+
+	# enforce some booleans:
+	bool_fields = ["valid_sale", "vacant_sale", "valid_for_ratio-study", "valid_for_land_ratio_study"]
+	for b in bool_fields:
+		if b in df_sales:
+			dtype = df_sales[b].dtype
+			if dtype != bool:
+				if is_series_all_bools(df_sales[b]):
+					df_sales[b] = df_sales[b].astype(bool)
+				else:
+					raise ValueError(f"Field '{b}' contains non-boolean values that cannot be coerced to boolean. Unique values = {df_sales[b].unique()}")
 
 	sup.update_sales(df_sales)
 
@@ -318,6 +344,12 @@ def _fill_unknown_values(df, settings: dict):
 		df["bldg_effective_age_years"] = valuation_year - df["bldg_effective_year_built"]
 	elif "bldg_effective_age_years" in df:
 		df["bldg_effective_year_built"] = valuation_year - df["bldg_effective_age_years"]
+
+	# fill year/age with zero after they've been normalized
+	year_age = ["bldg_year_built", "bldg_effective_year_built", "bldg_age_years", "bldg_effective_age_years"]
+	for field in year_age:
+		if field in df:
+			df = _fill_thing(df, field, "zero")
 
 	#remaining fields get auto-filled
 

@@ -120,10 +120,11 @@ def _do_calc(df_in: pd.DataFrame, entry: list, i:int=0):
   elif op == "striplzero":
     return lhs.astype(str).str.lstrip("0")
   elif op == "stripkey":
-    return lhs.astype(str).str.strip().str.lstrip("0")
+    return lhs.astype(str).str.replace(r'\s+', '', regex=True).str.lstrip("0")
+  elif op == "set":
+    return lhs
 
-
-  # Binary operations (LHS & RHS)
+    # Binary operations (LHS & RHS)
 
   rhs = None
   if len(entry) > 2:
@@ -171,6 +172,20 @@ def _do_calc(df_in: pd.DataFrame, entry: list, i:int=0):
   elif op == "join":
     result = lhs.astype(str).apply(lambda x: f"{rhs}".join(x), axis=1)
     return result
+  elif op == "substr":
+    if type(rhs) is dict:
+      a = rhs.get("left", None)
+      b = rhs.get("right", None)
+      if a is not None:
+        if b is not None:
+          return lhs.astype(str).str[a:b]
+        else:
+          return lhs.astype(str).str[a:]
+      else:
+        return lhs.astype(str).str[:b]
+    raise ValueError(f"Right-hand side value for operator 'substr' must be a dict containing 'left' and/or 'right' keys, found '{type(rhs)}' = {rhs}")
+    #return lhs.astype(str).str[-rhs:]
+
 
   raise ValueError(f"Unknown operation: {op}")
 

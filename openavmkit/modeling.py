@@ -425,6 +425,7 @@ class DataSplit:
     cat_vars = [col for col in ind_vars if col in self.categorical_vars]
 
     old_cols = ds.df_universe.columns.values
+    sale_cols_not_in_univ = [col for col in ds.df_sales if (col not in ds.df_universe)]
 
     # One-hot encode the categorical variables, perform this on ds rather than self, do it for everything:
     ds.df_universe = pd.get_dummies(ds.df_universe, columns=[col for col in cat_vars if col in ds.df_universe], drop_first=True)
@@ -448,7 +449,8 @@ class DataSplit:
       ds.df_multiverse = clean_column_names(ds.df_multiverse)
       ds.df_multiverse = ds.df_multiverse.drop(columns=[col for col in cat_vars if col in ds.df_multiverse])
 
-    new_cols = [col for col in ds.df_train.columns.values if col not in old_cols]
+    univ_cols = ds.df_universe.columns.values
+    new_cols = [col for col in ds.df_train.columns.values if col not in old_cols and col not in sale_cols_not_in_univ]
     ind_vars += new_cols
     ind_vars = [col for col in ind_vars if col in ds.df_train.columns]
     ds.ind_vars = ind_vars
@@ -468,13 +470,18 @@ class DataSplit:
           ds.one_hot_descendants[orig_col].append(col)
           matched.append(col)
 
-    ds.df_universe = ds.df_universe[ds.df_train.columns]
-    ds.df_sales = ds.df_sales[ds.df_train.columns]
-    if ds.df_multiverse is not None:
-      ds.df_multiverse = ds.df_multiverse[ds.df_train.columns]
+    train_cols = [col for col in ds.df_train.columns if col in ds.df_universe.columns]
+    train_cols_univ = train_cols.copy()
+    if "key_sale" not in train_cols:
+      train_cols = ["key_sale"] + train_cols
 
-    test_cols = [col for col in ds.df_train.columns if col in ds.df_test.columns]
-    extra_cols = [col for col in ds.df_train.columns if col not in test_cols]
+    ds.df_universe = ds.df_universe[train_cols_univ]
+    ds.df_sales = ds.df_sales[train_cols]
+    if ds.df_multiverse is not None:
+      ds.df_multiverse = ds.df_multiverse[train_cols_univ]
+
+    test_cols = [col for col in train_cols if col in ds.df_test.columns]
+    extra_cols = [col for col in train_cols if col not in test_cols]
 
     ds.df_test = ds.df_test[test_cols]
     # add extra_cols, set them to zero:
@@ -495,7 +502,7 @@ class DataSplit:
     # separate df into train & test:
 
     # select the rows that are in the test_keys:
-    self.df_test = self.df_sales[self.df_sales["key"].astype(str).isin(test_keys)].reset_index(drop=True)
+    self.df_test = self.df_sales[self.df_sales["key_sale"].astype(str).isin(test_keys)].reset_index(drop=True)
     self.df_train = self.df_sales.drop(self.df_test.index)
 
     self.df_test = self.df_test.reset_index(drop=True)
@@ -514,15 +521,15 @@ class DataSplit:
 
       # now, select only those records from the modified base sales set that are also in the above set,
       # but use the rows from the modified base sales set
-      _df_sales = self.df_sales[self.df_sales["key"].isin(_df_sales["key"])].reset_index(drop=True)
+      _df_sales = self.df_sales[self.df_sales["key_sale"].isin(_df_sales["key_sale"])].reset_index(drop=True)
 
       # use these as our sales
       self.df_sales = _df_sales
 
       # set df_test/train to only those rows that are also in sales:
       # we don't need to use get_sales() because they've already been transformed to vacant
-      self.df_test = self.df_test[self.df_test["key"].isin(self.df_sales["key"])].reset_index(drop=True)
-      self.df_train = self.df_train[self.df_train["key"].isin(self.df_sales["key"])].reset_index(drop=True)
+      self.df_test = self.df_test[self.df_test["key_sale"].isin(self.df_sales["key_sale"])].reset_index(drop=True)
+      self.df_train = self.df_train[self.df_train["key_sale"].isin(self.df_sales["key_sale"])].reset_index(drop=True)
 
     _df_univ = self.df_universe.copy()
     _df_sales = self.df_sales.copy()
@@ -572,7 +579,8 @@ class DataSplit:
     self.train_sizes = self.train_sizes.astype("float64")
 
     # set the cluster to the "he_id":
-    self.train_he_ids = _df_train["he_id"]
+    if "he_id" in _df_train:
+      self.train_he_ids = _df_train["he_id"]
 
     if "land_he_id" in _df_train:
       self.train_land_he_ids = _df_train["land_he_id"]
@@ -671,6 +679,7 @@ class SingleModelResults:
     df_test = ds.df_test.copy()
 
     df_univ[field_prediction] = y_pred_univ
+
     df_test[field_prediction] = y_pred_test
 
     self.df_universe = df_univ
@@ -831,31 +840,23 @@ def predict_mra(ds: DataSplit, model: MRAModel, timing: TimingData, verbose: boo
   """
   fitted_model: RegressionResults = model.fitted_model
 
-  print("PREDICT MRA!")
-
   # predict on test set:
   timing.start("predict_test")
-  print("test")
-  print(f"test cols = {ds.X_test.columns}")
   y_pred_test = safe_predict(fitted_model.predict, ds.X_test)
   timing.stop("predict_test")
 
   # predict on the sales set:
   timing.start("predict_sales")
-  print("sales")
-  print(f"sales cols = {ds.X_sales.columns}")
   y_pred_sales = safe_predict(fitted_model.predict, ds.X_sales)
   timing.stop("predict_sales")
 
   # predict on the universe set:
   timing.start("predict_univ")
-  print("univ")
   y_pred_univ = safe_predict(fitted_model.predict, ds.X_univ)
   timing.stop("predict_univ")
 
   timing.start("predict_multi")
   if ds.df_multiverse is not None:
-    print("multi")
     y_pred_multi = safe_predict(fitted_model.predict, ds.X_multiverse)
   else:
     y_pred_multi = None
@@ -1241,7 +1242,7 @@ def predict_gwr(ds: DataSplit, gwr_model: GWRModel, timing: TimingData, verbose:
   coords_univ = list(zip(u, v))
 
   if ds.df_multiverse is not None:
-    X_multi = ds.X_multiverse.values.astype(np.float64)
+    X_multi = ds.X_multiverse.fillna(0).values.astype(np.float64)
     u_multi = ds.df_multiverse['longitude']
     v_multi = ds.df_multiverse['latitude']
     coords_multi = list(zip(u_multi, v_multi))
@@ -2186,12 +2187,13 @@ def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Timing
   df_land = df_land[["key", "per_land_sqft"]]
 
   # merge the df_sqft_land/impr values into the X_test dataframe:
+  X_test["key_sale"] = ds.df_test["key_sale"]
   X_test["key"] = ds.df_test["key"]
   X_test = X_test.merge(df_land, on="key", how="left")
   X_test = X_test.merge(df_impr, on="key", how="left")
   X_test.loc[X_test["per_impr_sqft"].isna() | X_test["per_impr_sqft"].eq(0), "per_impr_sqft"] = overall_per_impr_sqft
   X_test.loc[X_test["per_land_sqft"].isna() | X_test["per_land_sqft"].eq(0), "per_land_sqft"] = overall_per_land_sqft
-  X_test = X_test.drop(columns=["key"])
+  X_test = X_test.drop(columns=["key_sale", "key"])
 
   X_test_improved = X_test[X_test["bldg_area_finished_sqft"].gt(0)]
   X_test_vacant = X_test[X_test["bldg_area_finished_sqft"].eq(0)]
@@ -2208,12 +2210,13 @@ def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Timing
   X_sales = ds.X_sales
 
   # merge the df_sqft_land/impr values into the X_sales dataframe:
+  X_sales["key_sale"] = ds.df_sales["key_sale"]
   X_sales["key"] = ds.df_sales["key"]
   X_sales = X_sales.merge(df_land, on="key", how="left")
   X_sales = X_sales.merge(df_impr, on="key", how="left")
   X_sales.loc[X_sales["per_impr_sqft"].isna() | X_sales["per_impr_sqft"].eq(0), "per_impr_sqft"] = overall_per_impr_sqft
   X_sales.loc[X_sales["per_land_sqft"].isna() | X_sales["per_land_sqft"].eq(0), "per_land_sqft"] = overall_per_land_sqft
-  X_sales = X_sales.drop(columns=["key"])
+  X_sales = X_sales.drop(columns=["key_sale", "key"])
 
   X_sales_improved = X_sales[X_sales["bldg_area_finished_sqft"].gt(0)]
   X_sales_vacant = X_sales[X_sales["bldg_area_finished_sqft"].eq(0)]
@@ -2343,12 +2346,12 @@ def _prepredict_lars_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Tim
   X_train = ds.X_train
 
   # merge the df_sqft_land/impr values into the X_sales dataframe:
-  X_train["key"] = ds.df_train["key"]
-  X_train = X_train.merge(df_land, on="key", how="left")
-  X_train = X_train.merge(df_impr, on="key", how="left")
+  X_train["key_sale"] = ds.df_train["key_sale"]
+  X_train = X_train.merge(df_land, on="key_sale", how="left")
+  X_train = X_train.merge(df_impr, on="key_sale", how="left")
   X_train.loc[X_train["per_impr_sqft"].isna() | X_train["per_impr_sqft"].eq(0), "per_impr_sqft"] = overall_per_impr_sqft
   X_train.loc[X_train["per_land_sqft"].isna() | X_train["per_land_sqft"].eq(0), "per_land_sqft"] = overall_per_land_sqft
-  X_train = X_train.drop(columns=["key"])
+  X_train = X_train.drop(columns=["key_sale", "key"])
 
   X_train_improved = X_train[X_train["bldg_area_finished_sqft"].gt(0)]
   X_train["prediction_land"] = X_train_improved["land_area_sqft"] * X_train_improved["per_land_sqft"]
@@ -2852,7 +2855,7 @@ def _run_local_sqft(ds: DataSplit, location_fields: list[str], sales_chase: floa
     print(f"--> optimal improved $/finished sqft (overall) = {overall_per_impr_sqft:0.2f}")
     print(f"--> optimal vacant   $/land     sqft (overall) = {overall_per_land_sqft:0.2f}")
 
-  return LocalSqftModel(loc_map, location_fields, overall_per_impr_sqft, overall_per_land_sqft, sales_chase), TimingData
+  return LocalSqftModel(loc_map, location_fields, overall_per_impr_sqft, overall_per_land_sqft, sales_chase), timing
 
 
 def _objective_lars(params, land_he_ids: np.ndarray, impr_he_ids: np.ndarray, X_train: pd.DataFrame, y_train: np.ndarray, verbose=False):
@@ -3138,8 +3141,8 @@ def _get_params(name: str, slug: str, ds: DataSplit, tune_func, outpath: str, sa
     params = tune_func(
       ds.X_train,
       ds.y_train,
-      train_sizes=ds.train_sizes,
-      train_he_ids=ds.train_he_ids,
+      sizes=ds.train_sizes,
+      he_ids=ds.train_he_ids,
       verbose=verbose,
       cat_vars=ds.categorical_vars,
       **kwargs

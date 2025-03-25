@@ -123,7 +123,7 @@ def _finalize_land_values(
 
   df_subset = df_orig[df_orig["model_group"].eq(model_group)]
   df_sales = get_sales(df_subset, settings)
-  df_sales = df_sales.merge(df[["key", "model_market_value", "model_land_value", "model_land_value_land_sqft"]], on="key", how="left")
+  df_sales = df_sales.merge(df[["key_sale", "key", "model_market_value", "model_land_value", "model_land_value_land_sqft"]], on="key", how="left")
   df_sales["model_market_value_impr_sqft"] = div_field_z_safe(df_sales["model_market_value"], df_sales["bldg_area_finished_sqft"])
   df_sales["model_market_value_land_sqft"] = div_field_z_safe(df_sales["model_market_value"], df_sales["land_area_sqft"])
 

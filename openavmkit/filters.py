@@ -73,6 +73,10 @@ def resolve_filter(df: pd.DataFrame, f: list) -> pd.Series:
   :rtype: pandas.Series
   :raises ValueError: If the operator is unknown.
   """
+
+  if len(f) == 0:
+    return pd.Series(False, index=df.index)
+
   operator = f[0]
 
   # check if operator is a boolean operator:
@@ -93,8 +97,8 @@ def resolve_filter(df: pd.DataFrame, f: list) -> pd.Series:
     if operator == "<": return df[field].fillna(0).lt(value)
     if operator == ">=": return df[field].fillna(0).ge(value)
     if operator == "<=": return df[field].fillna(0).le(value)
-    if operator == "==": return df[field].fillna(0).eq(value)
-    if operator == "!=": return df[field].fillna(0).ne(value)
+    if operator == "==": return df[field].eq(value)
+    if operator == "!=": return df[field].ne(value)
     if operator == "isin": return df[field].isin(value)
     if operator == "notin": return ~df[field].isin(value)
     if operator == "isempty": return pd.isna(df[field]) | df[field].astype(str).str.strip().eq("")

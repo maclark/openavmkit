@@ -117,6 +117,18 @@ def load_settings(settings_file: str = "in/settings.json", settings_object: dict
    return openavmkit.utilities.settings.load_settings(settings_file, settings_object)
 
 
+def examine_sup_in_ridiculous_detail(sup: SalesUniversePair, s: dict):
+   print("")
+   print("EXAMINING UNIVERSE...")
+   print("")
+   examine_df_in_ridiculous_detail(sup["universe"], s)
+
+   print("")
+   print("EXAMINING SALES...")
+   print("")
+   examine_df_in_ridiculous_detail(sup["sales"], s)
+
+
 def examine_sup(sup: SalesUniversePair, s: dict):
    """
    Print examination details of the sales and universe data from a SalesUniversePair.
@@ -140,6 +152,149 @@ def examine_sup(sup: SalesUniversePair, s: dict):
    print("")
    examine_df(sup["sales"], s)
 
+
+def examine_df_in_ridiculous_detail(df: pd.DataFrame, s: dict):
+   def fill_str(char: str, size: int):
+      text = ""
+      for _i in range(0, size):
+         text += char
+      return text
+
+   def fit_str(txt: str, size: int):
+      if len(txt) >= size:
+         len_first = int((size - 3) / 2)
+         len_last = (size - 3) - len_first
+         first_bit = txt[0:len_first]
+         last_bit = txt[len(txt) - len_last:]
+         txt = first_bit + "..." + last_bit
+      return f"{txt:{size}}"
+
+   def get_num_line(col):
+      describe = df[col].describe()
+      return f"DESCRIBE --> {describe}\n\n"
+
+   def get_cat_line(col):
+      value_counts = df[col].value_counts()
+      return f"VALUE COUNTS --> {value_counts}\n\n"
+
+   def get_line(col, dtype, count_non_zero, p, count_non_null, pnn, uniques: list or str):
+      dtype = f"{dtype}"
+      if type(count_non_zero) != str:
+         count_non_zero = f"{count_non_zero:,}"
+
+      if type(count_non_null) != str:
+         count_non_null = f"{count_non_null:,}"
+
+      if isinstance(uniques, list):
+         unique_str = str(uniques)
+         if len(unique_str) > 40:
+            uniques = f"{len(uniques):,}"
+         else:
+            uniques = unique_str
+
+      return f"{fit_str(col, 30)} {dtype:^10} {count_non_zero:>10} {p:>5.0%} {count_non_null:>10} {pnn:>5.0%} {uniques:>40}"
+
+   def print_horz_line(char: str):
+      print(fill_str(char, 30) + " " + fill_str(char, 10) + " " + fill_str(char, 10) +
+            " " + fill_str(char, 5) + " " + fill_str(char, 10) + " " + fill_str(char, 5) +
+            " " + fill_str(char, 40))
+
+   print(f"{'FIELD':^30} {'TYPE':^10} {'NON-ZERO':^10} {'%':^5} {'NON-NULL':^10} {'%':^5} {'UNIQUE':^40}")
+
+   fields_land = get_fields_land(s, df)
+   fields_impr = get_fields_impr(s, df)
+   fields_other = get_fields_other(s, df)
+
+   fields_noted = []
+
+   stuff = {
+      "land": {"name": "LAND", "fields": fields_land},
+      "impr": {"name": "IMPROVEMENT", "fields": fields_impr},
+      "other": {"name": "OTHER", "fields": fields_other}
+   }
+
+   i = 0
+
+   for landimpr in stuff:
+      entry = stuff[landimpr]
+      name = entry["name"]
+
+      fields = entry["fields"]
+      nums = fields["numeric"]
+      bools = fields["boolean"]
+      cats = fields["categorical"]
+
+      if (len(nums) + len(bools) + len(cats)) == 0:
+         continue
+
+      if i != 0:
+         print("")
+
+      print_horz_line("=")
+      print(f"{name:^30}")
+      print_horz_line("=")
+
+      nums.sort()
+      bools.sort()
+      cats.sort()
+
+      if len(nums) > 0:
+         print_horz_line("-")
+         print(f"{'NUMERIC':^30}")
+         print_horz_line("-")
+         for n in nums:
+            fields_noted.append(n)
+            df_non_null = df[~pd.isna(df[n])]
+            non_zero = len(df_non_null[np.abs(df_non_null[n]).gt(0)])
+            perc = non_zero / len(df)
+            non_null = len(df_non_null)
+            perc_non_null = non_null / len(df)
+            print(get_line(n, df[n].dtype, non_zero, perc, non_null, perc_non_null, ""))
+            print(get_num_line(n))
+
+      if len(bools) > 0:
+         print_horz_line("-")
+         print(f"{'BOOLEAN':^30}")
+         print_horz_line("-")
+         for b in bools:
+            fields_noted.append(b)
+            df_non_null = df[~pd.isna(df[b])]
+            non_zero = len(df_non_null[np.abs(df_non_null[b]).gt(0)])
+            perc = non_zero / len(df)
+            non_null = len(df_non_null)
+            perc_non_null = non_null / len(df)
+            print(get_line(b, df[b].dtype, non_zero, perc, non_null, perc_non_null, df[b].unique().tolist()))
+
+      if len(cats) > 0:
+         print_horz_line("-")
+         print(f"{'CATEGORICAL':^30}")
+         print_horz_line("-")
+         for c in cats:
+            fields_noted.append(c)
+            non_zero = (~pd.isna(df[c])).sum()
+            perc = non_zero / len(df)
+            print(get_line(c, df[c].dtype, non_zero, perc, non_zero, perc, df[c].unique().tolist()))
+            print(get_cat_line(c))
+
+      i += 1
+
+   fields_unclassified = []
+
+   for column in df.columns:
+      if column not in fields_noted:
+         fields_unclassified.append(column)
+
+   if len(fields_unclassified) > 0:
+      fields_unclassified.sort()
+      print("")
+      print_horz_line("=")
+      print(f"{'UNCLASSIFIED:':<30}")
+      print_horz_line("=")
+      for u in fields_unclassified:
+         non_zero = (~pd.isna(df[u])).sum()
+         perc = non_zero / len(df)
+         perc_non_null = non_zero / len(df)
+         print(get_line(u, df[u].dtype, non_zero, perc, non_zero, perc, list(df[u].unique())))
 
 
 def examine_df(df: pd.DataFrame, s: dict):
@@ -239,9 +394,10 @@ def examine_df(df: pd.DataFrame, s: dict):
          print_horz_line("-")
          for n in nums:
             fields_noted.append(n)
-            non_zero = len(df[np.abs(df[n]).gt(0)])
+            df_non_null = df[~pd.isna(df[n])]
+            non_zero = len(df_non_null[np.abs(df_non_null[n]).gt(0)])
             perc = non_zero / len(df)
-            non_null = len(df[~pd.isna(df[n])])
+            non_null = len(df_non_null)
             perc_non_null = non_null / len(df)
             print(get_line(n, df[n].dtype, non_zero, perc, non_null, perc_non_null, ""))
 
@@ -251,9 +407,10 @@ def examine_df(df: pd.DataFrame, s: dict):
          print_horz_line("-")
          for b in bools:
             fields_noted.append(b)
-            non_zero = len(df[np.abs(df[b]).gt(0)])
+            df_non_null = df[~pd.isna(df[b])]
+            non_zero = len(df_non_null[np.abs(df_non_null[b]).gt(0)])
             perc = non_zero / len(df)
-            non_null = len(df[~pd.isna(df[b])])
+            non_null = len(df_non_null)
             perc_non_null = non_null / len(df)
             print(get_line(b, df[b].dtype, non_zero, perc, non_null, perc_non_null, df[b].unique().tolist()))
 
@@ -383,11 +540,17 @@ def process_sales(sup: SalesUniversePair, settings: dict, verbose: bool = False)
    # select only valid sales
    sup = clean_valid_sales(sup, settings)
 
+   print(f"len before hydrate = {len(sup['sales'])}")
+
    # make sure sales field has necessary fields for the next step
    df_sales_hydrated = get_hydrated_sales_from_sup(sup)
 
+   print(f"len after hydrate = {len(sup['sales'])}")
+
    # enrich with time adjustment, and mark what fields were added
    df_sales_enriched = enrich_time_adjustment(df_sales_hydrated, settings, verbose)
+
+   print(f"len after enrich = {len(df_sales_enriched)}")
 
    # update the SUP sales
    sup.update_sales(df_sales_enriched)
@@ -582,7 +745,8 @@ def run_models(
     use_saved_results: bool = True,
     verbose: bool = False,
     run_main: bool = True,
-    run_vacant: bool = True
+    run_vacant: bool = True,
+    run_hedonic: bool = True
 ):
    """
    Runs predictive models on the given SalesUniversePair. This function takes detailed instructions from the provided
@@ -614,7 +778,7 @@ def run_models(
    :type run_vacant: bool, optional
    :returns: FILL_IN_HERE: Describe the output.
    """
-   return openavmkit.benchmark.run_models(sup, settings, save_params, use_saved_params, use_saved_results, verbose, run_main, run_vacant)
+   return openavmkit.benchmark.run_models(sup, settings, save_params, use_saved_params, use_saved_results, verbose, run_main, run_vacant, run_hedonic)
 
 
 def finalize_land_values_sup(sup: SalesUniversePair, settings: dict, generate_boundaries: bool = False, verbose: bool = False):
@@ -637,7 +801,7 @@ def finalize_land_values_sup(sup: SalesUniversePair, settings: dict, generate_bo
    # return openavmkit.land.finalize_land_values()
 
 
-def write_canonical_splits(df_sales_in: pd.DataFrame, settings: dict):
+def write_canonical_splits(sup: SalesUniversePair, settings: dict):
    """
    Write canonical splits for the sales DataFrame. This separates the sales data into training and test sets and stores
    the keys to disk. This way, the same splits can be used consistently for multiple models, ensuring that the results
@@ -646,13 +810,13 @@ def write_canonical_splits(df_sales_in: pd.DataFrame, settings: dict):
    This function delegates the operation to :func:`openavmkit.data._write_canonical_splits`.
    :func:`openavmkit.data._write_canonical_splits`.
 
-   :param df_sales_in: The sales DataFrame.
-   :type df_sales_in: pd.DataFrame
+   :param sup: Sales and universe data.
+    :type sup: SalesUniversePair
    :param settings: Configuration settings.
    :type settings: dict
    :returns: None
    """
-   openavmkit.data._write_canonical_splits(df_sales_in, settings)
+   openavmkit.data._write_canonical_splits(sup, settings)
 
 
 def run_and_write_ratio_study_breakdowns(settings: dict):

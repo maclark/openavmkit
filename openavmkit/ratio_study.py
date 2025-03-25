@@ -257,6 +257,10 @@ def _run_ratio_study_breakdowns(settings: dict, df_sales: pd.DataFrame, confiden
 						# TODO: when we have variable replacement in settings maybe we won't need this anymore
 						by = by.replace("<", "").replace(">", "")
 						by = get_important_field(settings, by, df)
+
+					if by is None:
+						continue
+
 					cluster = {}
 					catch_all = {"predictions":np.array([]), "ground_truth":np.array([]), "count":0}
 					if by in cat_fields:
@@ -314,6 +318,8 @@ def _run_ratio_study_breakdowns(settings: dict, df_sales: pd.DataFrame, confiden
 								ground_truth = df_slice["sale_price"].values
 								cluster, catch_all = _add_ratio_study(predictions, ground_truth, cluster, value, catch_all, confidence_interval, iterations, min_sales)
 						else:
+							if by not in df_sub:
+								raise ValueError(f"Field '{by}' not found in df_sub")
 							values = df_sub[by].unique()
 							for value in values:
 								df_slice = df_sub[df_sub[by].eq(value)]
