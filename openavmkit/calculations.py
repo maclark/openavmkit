@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 
@@ -172,6 +174,13 @@ def _do_calc(df_in: pd.DataFrame, entry: list, i:int=0):
   elif op == "join":
     result = lhs.astype(str).apply(lambda x: f"{rhs}".join(x), axis=1)
     return result
+  elif op == "datetime":
+    result = pd.to_datetime(lhs, format=rhs)
+    return result
+  elif op == "datetimestr":
+    result = pd.to_datetime(lhs, format=rhs)
+    str_value = result.dt.strftime("%Y-%m-%d")
+    return str_value
   elif op == "substr":
     if type(rhs) is dict:
       a = rhs.get("left", None)
