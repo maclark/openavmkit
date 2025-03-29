@@ -24,6 +24,8 @@ def test_clusters():
 
 	settings = load_settings("", settings)
 
+	verbose=True
+
 	sup = mark_horizontal_equity_clusters_per_model_group_sup(sup, settings, verbose=verbose)
 	df = sup.universe
 

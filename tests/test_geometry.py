@@ -1,3 +1,5 @@
+import math
+
 import geopandas as gpd
 import pandas as pd
 from IPython.core.display_functions import display
@@ -7,9 +9,10 @@ from shapely import Point, Polygon
 
 from openavmkit.data import _perform_spatial_joins
 from openavmkit.modeling import plot_value_surface
+from openavmkit.synthetic.city import make_geo_blocks, make_geo_blocks_raw
 from openavmkit.utilities.assertions import dfs_are_equal
 from openavmkit.utilities.geometry import get_crs, offset_coordinate_miles, create_geo_rect, create_geo_circle, \
-  offset_coordinate_km
+  offset_coordinate_km, distance_km, create_geo_rect_shape_km, get_crs_from_lat_lon
 
 
 def _get_test_cases():
@@ -259,3 +262,143 @@ def test_spatial_join_contains_centroid():
   #
   # # Create a legend manually
   # plt.show()
+
+
+def test_offset_lat_lon():
+
+  sqrt_2 = math.sqrt(2.0)
+
+  print("")
+
+  # 4 coordinates in four different hemispheres
+  coordinates = [
+    {"city": "Houston", "lat": 29.761278, "long": -95.358003},
+    {"city": "Tokyo", "lat": 35.6895, "long": 139.6917},
+    {"city": "Rio de Janeiro", "lat": -22.9068, "long": -43.1729},
+    {"city": "Melbourne", "lat": -37.8136, "long": 144.9631}
+  ]
+
+  for coord in coordinates:
+    lat = coord["lat"]
+    long = coord["long"]
+
+    # Offset the coordinate by one kilometer in all 8 directions
+    matrix = [
+      {"dist": {"lat_km":  0, "lon_km":  0}, "expect": {"lat":  0, "long":  0, "dist": 0}},
+
+      {"dist": {"lat_km":  1, "lon_km":  0}, "expect": {"lat":  1, "long":  0, "dist": 1}},
+      {"dist": {"lat_km":  0, "lon_km":  1}, "expect": {"lat":  0, "long":  1, "dist": 1}},
+      {"dist": {"lat_km":  1, "lon_km":  1}, "expect": {"lat":  1, "long":  1, "dist": sqrt_2}},
+
+      {"dist": {"lat_km": -1, "lon_km":  0}, "expect": {"lat": -1, "long":  0, "dist": 1}},
+      {"dist": {"lat_km":  0, "lon_km": -1}, "expect": {"lat":  0, "long": -1, "dist": 1}},
+      {"dist": {"lat_km": -1, "lon_km": -1}, "expect": {"lat": -1, "long": -1, "dist": sqrt_2}},
+
+      {"dist": {"lat_km": -1, "lon_km":  1}, "expect": {"lat": -1, "long":  1, "dist": sqrt_2}},
+      {"dist": {"lat_km":  1, "lon_km": -1}, "expect": {"lat":  1, "long": -1, "dist": sqrt_2}}
+    ]
+
+    for entry in matrix:
+      lat_km = entry["dist"]["lat_km"]
+      lon_km = entry["dist"]["lon_km"]
+
+      # Offset the coordinate by lat_km and lon_km
+      new_lat, new_long = offset_coordinate_km(lat, long, lat_km, lon_km)
+
+      # Measure overall distance and component distances
+      dist = distance_km(lat, long, new_lat, new_long)
+      dist_lat = distance_km(lat, long, new_lat, long)
+      dist_long = distance_km(lat, long, lat, new_long)
+
+      # Determine the sign of the lat/long differences
+      sign_lat = -1 if (new_lat - lat) < 0 and abs(new_lat - lat) > 1e-6 else 1
+      sign_long = -1 if (new_long - long) < 0 and abs(new_long - long) > 1e-6 else 1
+
+      expect_sign_lat = -1 if entry["expect"]["lat"] < 0 else 1
+      expect_sign_long = -1 if entry["expect"]["long"] < 0 else 1
+
+      diff_dist = (dist - entry["expect"]["dist"])
+      diff_lats = (dist_lat - abs(entry["expect"]["lat"]))
+      diff_longs = (dist_long - abs(entry["expect"]["long"]))
+
+      assert abs(diff_dist) < 1e-3
+      assert abs(diff_lats) < 1e-6
+      assert abs(diff_longs) < 1e-6
+      assert sign_lat == expect_sign_lat
+      assert sign_long == expect_sign_long
+
+
+def test_create_geo_rect_shape():
+
+  coordinates = [
+    {"city": "Houston", "lat": 29.761278, "long": -95.358003},
+    {"city": "Tokyo", "lat": 35.6895, "long": 139.6917},
+    {"city": "Rio de Janeiro", "lat": -22.9068, "long": -43.1729},
+    {"city": "Melbourne", "lat": -37.8136, "long": 144.9631}
+  ]
+
+  for coord in coordinates:
+    lat = coord["lat"]
+    long = coord["long"]
+
+    poly = create_geo_rect_shape_km(lat, long, 1.0, 1.0, anchor_point="nw")
+
+    last_coord = None
+    for coord in poly.exterior.coords:
+      if last_coord is not None:
+        dist = distance_km(last_coord[1], last_coord[0], coord[1], coord[0])
+        assert abs(dist - 1.0) < 1e-3
+      last_coord = coord
+
+
+def test_make_geo_blocks():
+
+  coordinates = [
+    {"city": "Houston", "lat": 29.761278, "long": -95.358003},
+    #{"city": "Tokyo", "lat": 35.6895, "long": 139.6917},
+    #{"city": "Rio de Janeiro", "lat": -22.9068, "long": -43.1729},
+    #{"city": "Melbourne", "lat": -37.8136, "long": 144.9631}
+  ]
+
+  block_size_x = 1000
+  block_size_y = 1000
+
+  blocks = [
+    {"x": x, "y": y} for x in range(0, 3) for y in range(0, 3)
+  ]
+
+  print("")
+
+  for coord in coordinates:
+    lat = coord["lat"]
+    long = coord["long"]
+
+    blocks = make_geo_blocks_raw(lat, long, block_size_y, block_size_x, blocks, "m")
+    for block in blocks:
+      geom = block["geometry"]
+      coords = geom.exterior.coords
+      print("")
+      for coord in coords:
+        print(f"--> {coord[0]}, {coord[1]}")
+
+
+
+
+  # def make_geo_blocks(latitude, longitude, block_size_y, block_size_x, blocks: list, crs: Any)->gpd.GeoDataFrame:
+  #   o_y = latitude
+  #   o_x = longitude
+  #
+  #   y_size = block_size_y
+  #   x_size = block_size_x
+  #
+  #   for block in blocks:
+  #     x = block["x"]
+  #     y = block["y"]
+  #     x_offset = x * x_size
+  #     y_offset = y * y_size
+  #     pt_y, pt_x = offset_coordinate_feet(o_y, o_x, y_offset, x_offset)
+  #     geo = create_geo_rect_shape(pt_y, pt_x, x_size, y_size, "nw")
+  #     block["geometry"] = geo
+  #
+  #   gdf = gpd.GeoDataFrame(data=blocks, geometry="geometry", crs=crs)
+  #   return gdf

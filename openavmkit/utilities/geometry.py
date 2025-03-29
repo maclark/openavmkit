@@ -33,6 +33,11 @@ def get_crs(gdf, projection_type):
   # get centroid:
   lon, lat = gdf.centroid.x.mean(), gdf.centroid.y.mean()
 
+  return get_crs_from_lat_lon(lat, lon, projection_type)
+
+
+def get_crs_from_lat_lon(lat, lon, projection_type):
+
   if projection_type == 'latlon':
     # Return WGS 84 (EPSG:4326)
     return CRS.from_epsg(4326)
@@ -216,19 +221,31 @@ def offset_coordinate_m(lat, lon, lat_m, lon_m) -> (float, float):
 
 
 def offset_coordinate_km(lat, lon, lat_km, lon_km):
-  """Offsets a coordinate by lat_km km north and lon_km km east."""
-  start = Point(lat, lon)  # ✅ Correct (lat, lon) ordering
+  start = Point(lat, lon)
 
-  # Move latitude (North/South) - No need for scaling
-  new_lat = distance(kilometers=abs(lat_km)).destination(start, bearing=0 if lat_km >= 0 else 180).latitude
+  # Latitude shift (North/South)
+  new_lat = distance(kilometers=abs(lat_km)).destination(
+    start, bearing=0 if lat_km >= 0 else 180
+  ).latitude
 
-  # Scale longitude movement by cos(latitude)
-  lon_adjusted_km = lon_km / abs(math.cos(math.radians(lat)))
-
-  # Move longitude (East/West) with proper scaling
-  new_lon = distance(kilometers=abs(lon_adjusted_km)).destination(start, bearing=90 if lon_km >= 0 else 270).longitude
+  # Longitude shift (East/West)
+  new_lon = distance(kilometers=abs(lon_km)).destination(
+    start, bearing=90 if lon_km >= 0 else 270
+  ).longitude
 
   return new_lat, new_lon
+
+
+def distance_km(lat1, lon1, lat2, lon2):
+  """
+  Calculates the distance in kilometers between two latitude/longitude points.
+  :param lat1: Latitude of the first point.
+  :param lon1: Longitude of the first point.
+  :param lat2: Latitude of the second point.
+  :param lon2: Longitude of the second point.
+  :return: Distance in kilometers.
+  """
+  return distance((lat1, lon1), (lat2, lon2)).km
 
 
 def create_geo_circle(lat, lon, crs, radius_km, num_points=100):
@@ -258,7 +275,7 @@ def create_geo_circle(lat, lon, crs, radius_km, num_points=100):
   return gdf
 
 
-def create_geo_rect_shape(lat, lon, width_km, height_km, anchor_point="center"):
+def create_geo_rect_shape_km(lat, lon, width_km, height_km, anchor_point="center"):
   """
   Creates a GeoDataFrame containing a rectangle centered at the specified latitude and longitude.
   :param lat: The latitude of the center of the rectangle.
@@ -271,22 +288,26 @@ def create_geo_rect_shape(lat, lon, width_km, height_km, anchor_point="center"):
 
   if anchor_point == "center":
     off_nw_x = -width_km / 2
+    off_sw_x = -width_km / 2
+
     off_ne_x = width_km / 2
     off_se_x = width_km / 2
-    off_sw_x = -width_km / 2
 
     off_nw_y = height_km / 2
     off_ne_y = height_km / 2
+
     off_se_y = -height_km / 2
     off_sw_y = -height_km / 2
   elif anchor_point == "nw":
     off_nw_x = 0
+    off_sw_x = 0
+
     off_ne_x = width_km
     off_se_x = width_km
-    off_sw_x = 0
 
     off_nw_y = 0
     off_ne_y = 0
+
     off_se_y = -height_km
     off_sw_y = -height_km
   else:
@@ -318,7 +339,7 @@ def create_geo_rect(lat, lon, crs, width_km, height_km, anchor_point="center"):
   :return: A GeoDataFrame containing the rectangle.
   """
 
-  polygon = create_geo_rect_shape(lat, lon, width_km, height_km, anchor_point="center")
+  polygon = create_geo_rect_shape_km(lat, lon, width_km, height_km, anchor_point="center")
 
   # Create a GeoDataFrame
   gdf = gpd.GeoDataFrame(geometry=[polygon], crs=crs)
