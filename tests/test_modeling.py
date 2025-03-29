@@ -73,17 +73,6 @@ def test_run_lars_sqft():
 	#_run_lars_sqft(ds, ["neighborhood"], verbose=True)
 	run_lars(ds, ["neighborhood"], verbose=True)
 
-
-def test_guilford_sales_scrutiny():
-	# TODO: update this
-	return True
-
-
-def test_models_guilford():
-	# TODO: update this
-	return True
-
-
 def test_models_synthetic():
 	# TODO: update this
 	return True
