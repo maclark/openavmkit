@@ -275,6 +275,58 @@ def create_geo_circle(lat, lon, crs, radius_km, num_points=100):
   return gdf
 
 
+def create_geo_rect_shape_deg(lat, lon, width_deg, height_deg, anchor_point="center"):
+  """
+  Creates a GeoDataFrame containing a rectangle centered at the specified latitude and longitude.
+  :param lat: The latitude of the center of the rectangle.
+  :param lon: The longitude of the center of the rectangle.
+  :param width_deg: The width of the rectangle in degrees.
+  :param height_deg: The height of the rectangle in degrees.
+  :param anchor_point: The anchor point of the rectangle (center, nw).
+  :return: A GeoDataFrame containing the rectangle.
+  """
+
+  if anchor_point == "center":
+    off_nw_x = -width_deg / 2
+    off_sw_x = -width_deg / 2
+
+    off_ne_x = width_deg / 2
+    off_se_x = width_deg / 2
+
+    off_nw_y = height_deg / 2
+    off_ne_y = height_deg / 2
+
+    off_se_y = -height_deg / 2
+    off_sw_y = -height_deg / 2
+  elif anchor_point == "nw":
+    off_nw_x = 0
+    off_sw_x = 0
+
+    off_ne_x = width_deg
+    off_se_x = width_deg
+
+    off_nw_y = 0
+    off_ne_y = 0
+
+    off_se_y = -height_deg
+    off_sw_y = -height_deg
+  else:
+    raise ValueError("Invalid anchor point. Choose 'center' or 'nw'.")
+
+  # Calculate the four corners of the rectangle
+  nw_lat, nw_lon = lat + off_nw_y, lon + off_nw_x  # NW
+  ne_lat, ne_lon = lat + off_ne_y, lon + off_ne_x  # NE
+  se_lat, se_lon = lat + off_se_y, lon + off_se_x  # SE
+  sw_lat, sw_lon = lat + off_sw_y, lon + off_sw_x  # SW
+
+  # Order: NW → NE → SE → SW → NW (to close polygon)
+  polygon_coords = [(nw_lon, nw_lat), (ne_lon, ne_lat), (se_lon, se_lat), (sw_lon, sw_lat), (nw_lon, nw_lat)]
+
+  # Create a Polygon
+  polygon = Polygon(polygon_coords)
+  return polygon
+
+
 def create_geo_rect_shape_km(lat, lon, width_km, height_km, anchor_point="center"):
   """
   Creates a GeoDataFrame containing a rectangle centered at the specified latitude and longitude.
