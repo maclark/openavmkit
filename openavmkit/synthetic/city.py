@@ -267,56 +267,94 @@ class SynCity:
     self.gdf_roads = make_geo_roads_from_city(self, roads, units)
     self.gdf_parcels = make_geo_parcels_from_city(self, blocks, units)
 
-
-# Brazos county facts:
-# - CBD block:
-#   - 350x375 feet
-#   - 5-10 parcels per block
-# - Residential parcel:
-#   - 150-160 x 50-80 feet
-#   - 6-10 parcels per "strip"
-#   - 2:3 aspect ratio
+    #self.evolve_city()
 
 
+  def evolve_city(self):
 
-def _get_zoning_name(land_use: str, density: int, in_cbd: bool):
-  zoning = f"{land_use}{density}"
-  if in_cbd:
-    zoning = "CBD"
-  return zoning
+    self.quick_and_dirty_fill()
 
+    # Fill out all buildings according to master plan as of 100 years ago
+    # generate inflation curves for land, building, and city growth
+    # generate transactions each year
+    # depreciate buildings each year
+    # tear down buildings each year according to building actuarial table
+    # generate new construction each year according to building rate curve
+    # favor new construction in highest value areas
+    # build up to max density allowed, then sprawl out demand
 
-def _get_density_stats(density: int)->tuple:
+  def quick_and_dirty_fill(self):
 
-  if density == 0:
-    rows_per_block  = 1
-    parcels_per_row = 2
-    max_floors      = 2
-    lot_coverage    = 0.25
-  elif density == 1:
-    rows_per_block  = 1
-    parcels_per_row = 4
-    max_floors      = 2
-    lot_coverage    = 0.50
-  elif density == 2:
-    rows_per_block  = 2
-    parcels_per_row = 5
-    max_floors      = 4
-    lot_coverage    = 0.50
-  elif density == 3:
-    rows_per_block  = 2
-    parcels_per_row = 8
-    max_floors      = 6
-    lot_coverage    = 0.75
-  elif density == 4:
-    rows_per_block  = 2
-    parcels_per_row = 8
-    max_floors      = 10
-    lot_coverage    = 0.90
-  else:
-    raise ValueError(f"Invalid density: {density}")
+    # annual inflation rates
+    inflation_impr_rate = 0.02 # construction costs inflate at 2% per year
+    inflation_land_rate = 0.03 # land values inflate at 3% per year
 
-  return rows_per_block, parcels_per_row, max_floors, lot_coverage
+    # annual depreciation rates
+    depreciation = {
+      "residential": generate_depreciation_curve(
+        lifetime=60,
+        weight_linear=0.2,
+        weight_logistic=0.8,
+        steepness=0.3,
+        inflection_point=20
+      ),
+      "apartments": generate_depreciation_curve(
+        lifetime=60,
+        weight_linear=0.3,
+        weight_logistic=0.7,
+        steepness=0.25,
+        inflection_point=20
+      ),
+      "commercial": generate_depreciation_curve(
+        lifetime=50,
+        weight_linear=0.5,
+        weight_logistic=0.5,
+        steepness=0.35,
+        inflection_point=15
+      ),
+      "industrial": generate_depreciation_curve(
+        lifetime=60,
+        weight_linear=0.4,
+        weight_logistic=0.6,
+        steepness=0.3,
+        inflection_point=25
+      )
+    }
+    sales = {
+      "residential": 0.05,
+      "apartments": 0.025,
+      "commercial": 0.025,
+      "industrial": 0.025
+    }
+
+    parcels = self.gdf_parcels
+
+    percent_vacant = 0.1
+
+    random.seed(1337)
+
+    parcels["is_vacant"] = False
+    parcels["location_value"] = 0.0
+
+    for i, parcel in parcels.iterrows():
+
+      density = parcel["density"]
+      land_use = parcel["land_use"]
+
+      chance_vacant = percent_vacant * (0.9 ** density)
+
+      # decide if it's vacant or not
+      if random.random() < chance_vacant:
+        is_vacant = True
+      else:
+        is_vacant = False
+        parcel = generate_building(parcel)
+
+      # calculate distance to amenities and add bonuses
+
+      # calculate distance to nuisances and add penalties
+
+      pass
 
 
 def _get_draw_anchor_coords(city: SynCity):

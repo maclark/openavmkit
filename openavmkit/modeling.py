@@ -718,6 +718,9 @@ class SingleModelResults:
 
     self.pred_univ = y_pred_univ
     self.pred_multi = y_pred_multi
+
+    self._deal_with_log_and_sqft()
+
     timing.start("chd")
     df_univ_valid = df_univ.copy()
     df_univ_valid = pd.DataFrame(df_univ_valid)  # Ensure it's a Pandas DataFrame
@@ -736,6 +739,27 @@ class SingleModelResults:
     self.utility = model_utility_score(self)
     timing.stop("utility")
     self.timing = timing
+
+
+  def _deal_with_log_and_sqft(self):
+    # if it's a log model, we need to exponentiate the predictions
+    if self.dep_var.startswith("log_"):
+      self.pred_sales.y_pred = np.exp(self.pred_sales.y_pred)
+      self.pred_univ = np.exp(self.pred_univ)
+      self.pred_multi = np.exp(self.pred_multi)
+    if self.dep_var_test.startswith("log_"):
+      self.pred_test.y_pred = np.exp(self.pred_test.y_pred)
+
+    # if it's a sqft model, we need to further multiply the predictions by the size
+    for suffix in ["_size", "_land_sqft", "_impr_sqft"]:
+      if self.dep_var.endswith(suffix):
+        self.pred_sales.y_pred = self.pred_sales.y_pred * self.ds.df_sales[suffix]
+        self.pred_univ = self.pred_univ * self.ds.df_universe[suffix]
+        self.pred_multi = self.pred_multi * self.ds.df_multiverse[suffix]
+      if self.dep_var_test.startswith("log_"):
+        self.pred_test.y_pred = self.pred_test.y_pred * self.ds.df_test[suffix]
+
+
 
   def summary(self):
     """
