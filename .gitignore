@@ -12,7 +12,10 @@ notebooks/pipeline/out/
 notebooks/pipeline/cache/
 notebooks/.env
 notebooks/cache/
+notebooks/examples/*.gpkg
 notebooks/research/richie_2025/out/
+notebooks/examples/land_value/trial*
+notebooks/examples/land_value/out*
 .ipynb_checkpoints/
 .venv/*
 venv/*

@@ -742,6 +742,7 @@ def run_models(
     settings: dict,
     save_params: bool = True,
     use_saved_params: bool = True,
+    save_results: bool = True,
     use_saved_results: bool = True,
     verbose: bool = False,
     run_main: bool = True,
@@ -768,6 +769,8 @@ def run_models(
    :type save_params: bool, optional
    :param use_saved_params: Whether to use saved model parameters.
    :type use_saved_params: bool, optional
+   :param save_results: Whether to save model results.
+   :type save_results: bool, optional
    :param use_saved_results: Whether to use saved model results.
    :type use_saved_results: bool, optional
    :param verbose: If True, enables verbose output.
@@ -778,7 +781,7 @@ def run_models(
    :type run_vacant: bool, optional
    :returns: FILL_IN_HERE: Describe the output.
    """
-   return openavmkit.benchmark.run_models(sup, settings, save_params, use_saved_params, use_saved_results, verbose, run_main, run_vacant, run_hedonic)
+   return openavmkit.benchmark.run_models(sup, settings, save_params, use_saved_params, save_results, use_saved_results, verbose, run_main, run_vacant, run_hedonic)
 
 
 def finalize_land_values_sup(sup: SalesUniversePair, settings: dict, generate_boundaries: bool = False, verbose: bool = False):

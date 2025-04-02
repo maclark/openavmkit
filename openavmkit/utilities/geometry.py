@@ -36,22 +36,22 @@ def get_crs(gdf, projection_type):
   return get_crs_from_lat_lon(lat, lon, projection_type)
 
 
-def get_crs_from_lat_lon(lat, lon, projection_type):
+def get_crs_from_lat_lon(lat, lon, projection_type, units="m"):
 
   if projection_type == 'latlon':
     # Return WGS 84 (EPSG:4326)
     return CRS.from_epsg(4326)
 
   elif projection_type == 'equal_area':
-    # Return an equal-area projection centered on the centroid, ensuring meters
+    # Return an equal-area projection centered on the centroid
     return CRS.from_proj4(
-      f"+proj=aea +lat_1={lat-5} +lat_2={lat+5} +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m"
+      f"+proj=aea +lat_1={lat-5} +lat_2={lat+5} +lat_0={lat} +lon_0={lon} +datum=WGS84 +units={units}"
     )
 
   elif projection_type == 'equal_distance':
-    # Return an Azimuthal Equidistant projection centered on the centroid (meters)
+    # Return an Azimuthal Equidistant projection centered on the centroid
     return CRS.from_proj4(
-      f"+proj=aeqd +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m"
+      f"+proj=aeqd +lat_0={lat} +lon_0={lon} +datum=WGS84 +units={units}"
     )
 
   else:

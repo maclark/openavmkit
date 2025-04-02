@@ -12,14 +12,15 @@ from openavmkit.data import get_important_field, get_locations, _read_split_keys
 	get_hydrated_sales_from_sup, get_report_locations, get_sales
 from openavmkit.modeling import run_mra, run_gwr, run_xgboost, run_lightgbm, run_catboost, SingleModelResults, \
 	run_garbage, run_average, run_naive_sqft, predict_garbage, \
-	run_kernel, run_local_sqft, run_assessor, predict_average, predict_naive_sqft, predict_local_sqft, \
-	predict_assessor, predict_kernel, predict_gwr, predict_xgboost, predict_catboost, predict_lightgbm, \
-	GarbageModel, AverageModel, DataSplit, predict_lars
+	run_kernel, run_local_sqft, run_pass_through, predict_average, predict_naive_sqft, predict_local_sqft, \
+	predict_pass_through, predict_kernel, predict_gwr, predict_xgboost, predict_catboost, predict_lightgbm, \
+	GarbageModel, AverageModel, DataSplit, predict_lars, run_ground_truth, predict_ground_truth
 from openavmkit.reports import MarkdownReport, _markdown_to_pdf
 from openavmkit.time_adjustment import enrich_time_adjustment
 from openavmkit.utilities.data import div_z_safe, dataframe_to_markdown
 from openavmkit.utilities.format import fancy_format
-from openavmkit.utilities.modeling import NaiveSqftModel, LocalSqftModel, AssessorModel, GWRModel, MRAModel, LarsModel
+from openavmkit.utilities.modeling import NaiveSqftModel, LocalSqftModel, PassThroughModel, GWRModel, MRAModel, \
+	LarsModel, GroundTruthModel
 from openavmkit.utilities.settings import get_fields_categorical, get_variable_interactions, get_valuation_date, \
 	get_model_group, apply_dd_to_df_rows, get_model_group_ids
 from openavmkit.utilities.stats import calc_vif_recursive_drop, calc_t_values_recursive_drop, \
@@ -182,7 +183,6 @@ def get_variable_recommendations(
 	except ValueError as e:
 		nulls_in_X = X_sales[X_sales.isna().any(axis=1)]
 		print(f"Found {len(nulls_in_X)} rows with nulls in X:")
-		display(nulls_in_X)
 		raise e
 
 	# R² values
@@ -318,6 +318,7 @@ def run_models(
 		settings: dict,
 		save_params: bool = True,
 		use_saved_params: bool = True,
+		save_results: bool = True,
 		use_saved_results: bool = True,
 		verbose: bool = False,
 		run_main: bool = True,
@@ -343,6 +344,8 @@ def run_models(
   :type save_params: bool, optional
   :param use_saved_params: Whether to use saved model parameters.
   :type use_saved_params: bool, optional
+  :param save_results: Whether to save model results.
+  :type save_results: bool, optional
   :param use_saved_results: Whether to use saved model results.
   :type use_saved_results: bool, optional
   :param verbose: If True, prints additional information.
@@ -364,6 +367,8 @@ def run_models(
 	if len(model_groups) == 0:
 		model_groups = get_model_group_ids(settings, df_univ)
 
+	dict_all_results = {}
+
 	for model_group in model_groups:
 		if verbose:
 			print("")
@@ -374,7 +379,38 @@ def run_models(
 				continue
 			if not vacant_only and not run_main:
 				continue
-			_run_models(sup, model_group, settings, vacant_only, save_params, use_saved_params, use_saved_results, verbose, run_hedonic)
+			mg_results = _run_models(sup, model_group, settings, vacant_only, save_params, use_saved_params, save_results, use_saved_results, verbose, run_hedonic)
+			dict_all_results[model_group] = mg_results
+
+	write_out_all_results(sup, dict_all_results)
+
+	return dict_all_results
+
+
+def write_out_all_results(sup:SalesUniversePair, all_results:dict):
+	df_all = None
+
+	for model_group in all_results:
+		mm_results:MultiModelResults = all_results[model_group]
+		ensemble:SingleModelResults = mm_results.model_results["ensemble"]
+
+		df_univ_local = ensemble.df_universe[["key", ensemble.field_prediction]].rename(columns={ensemble.field_prediction: "market_value"})
+		df_univ_local["model_group"] = model_group
+
+		if df_all is None:
+			df_all = df_univ_local
+		else:
+			df_all = pd.concat([df_all, df_univ_local])
+
+	df_univ = sup.universe.copy()
+	df_univ = df_univ.merge(df_all, on="key", how="left")
+
+	outpath = "out/models/all_model_groups"
+	if not os.path.exists(outpath):
+		os.makedirs(outpath)
+
+	df_univ.to_csv(f"{outpath}/universe.csv", index=False)
+	df_univ.to_parquet(f"{outpath}/universe.parquet", index=False)
 
 
 # Private functions:
@@ -574,11 +610,11 @@ def _predict_one_model(
 		lars_model: LarsModel = smr.model
 		results = predict_lars(ds, lars_model, timing, verbose)
 	elif model_name == "assessor":
-		assr_model: AssessorModel = smr.model
-		results = predict_assessor(ds, assr_model, timing, verbose)
+		assr_model: PassThroughModel = smr.model
+		results = predict_pass_through(ds, assr_model, timing, verbose)
 	elif model_name == "ground_truth":
-		assr_model: AssessorModel = smr.model
-		results = predict_assessor(ds, assr_model, timing, verbose)
+		assr_model: GroundTruthModel = smr.model
+		results = predict_ground_truth(ds, assr_model, timing, verbose)
 	elif model_name == "mra":
 		# MRA is a special case where we have to call run_ instead of predict_, because there's delicate state mangling.
 		# We pass the pretrained `model` object to run_mra() to get it to skip training and move straight to prediction
@@ -691,8 +727,8 @@ def _get_data_split_for(
 	)
 
 
-def _run_one_model(
-		df_multiverse: pd.DataFrame,
+def run_one_model(
+		df_multiverse: pd.DataFrame | None,
 		df_sales: pd.DataFrame,
 		df_universe: pd.DataFrame,
 		vacant_only: bool,
@@ -707,9 +743,12 @@ def _run_one_model(
 		outpath: str,
 		save_params: bool,
 		use_saved_params: bool,
+		save_results: bool,
 		use_saved_results: bool,
 		verbose: bool = False,
-		hedonic: bool = False
+		hedonic: bool = False,
+		test_keys: list[str] | None = None,
+		train_keys: list[str] | None = None
 ) -> SingleModelResults | None:
 	"""
   Run a single model based on provided parameters and return its results.
@@ -744,12 +783,18 @@ def _run_one_model(
   :type save_params: bool
   :param use_saved_params: Whether to use saved parameters.
   :type use_saved_params: bool
+  :param save_results: Whether to save results.
+  :type save_results: bool
   :param use_saved_results: Whether to load saved results if available.
   :type use_saved_results: bool
   :param verbose: If True, prints additional information.
   :type verbose: bool, optional
   :param hedonic: Whether to use hedonic pricing.
   :type hedonic: bool, optional
+  :param test_keys: Optional list of test keys (will be read from disk if not provided)
+  :type test_keys: list[str] or None
+  :param train_keys: Optional list of training keys (will be read from disk if not provided)
+  :type train_keys: list[str] or None
   :returns: SingleModelResults if successful, else None.
   :rtype: SingleModelResults or None
   """
@@ -761,7 +806,7 @@ def _run_one_model(
 		return results
 
 	entry: dict | None = model_entries.get(model, None)
-	default_entry: dict | None = model_entries.get("default", None)
+	default_entry: dict | None = model_entries.get("default", {})
 	if entry is None:
 		entry = default_entry
 		if entry is None:
@@ -788,7 +833,14 @@ def _run_one_model(
 
 	interactions = get_variable_interactions(entry, settings, df_sales)
 	location_fields = get_locations(settings, df_sales)
-	test_keys, train_keys = _read_split_keys(model_group)
+
+	if test_keys is None or train_keys is None:
+		test_keys, train_keys = _read_split_keys(model_group)
+	else:
+		if verbose:
+			print(f"--> using provided test/train keys")
+			print(f"--> test keys: {len(test_keys)}")
+			print(f"--> train keys: {len(train_keys)}")
 
 	ds = _get_data_split_for(
 		name=model_name,
@@ -829,9 +881,9 @@ def _run_one_model(
 	elif model_name == "local_sqft":
 		results = run_local_sqft(ds, location_fields=location_fields, sales_chase=sales_chase, verbose=verbose)
 	elif model_name == "assessor":
-		results = run_assessor(ds, verbose=verbose)
+		results = run_pass_through(ds, verbose=verbose)
 	elif model_name == "ground_truth":
-		results = run_assessor(ds, verbose=verbose)
+		results = run_ground_truth(ds, verbose=verbose)
 	elif model_name == "mra":
 		results = run_mra(ds, intercept=intercept, verbose=verbose)
 	elif model_name == "kernel":
@@ -1353,7 +1405,7 @@ def _optimize_ensemble_iteration(
 	if verbose:
 		print(f"score = {score:5.0f}, best = {best_score:5.0f}, ensemble = {ensemble_list}...")
 
-	if score < best_score and len(ensemble_list) >= 3:
+	if score < best_score: # and len(ensemble_list) >= 3:
 		best_score = score
 		best_list = ensemble_list.copy()
 
@@ -2002,6 +2054,7 @@ def _run_models(
 		vacant_only: bool = False,
 		save_params: bool = True,
 		use_saved_params: bool = True,
+		save_results: bool = False,
 		use_saved_results: bool = True,
 		verbose: bool = False,
 		run_hedonic: bool = True
@@ -2021,6 +2074,8 @@ def _run_models(
   :type save_params: bool, optional
   :param use_saved_params: Whether to use saved parameters.
   :type use_saved_params: bool, optional
+  :param save_results: Whether to save results.
+  :type save_results: bool
   :param use_saved_results: Whether to use saved results if available.
   :type use_saved_results: bool, optional
   :param verbose: If True, prints additional information.
@@ -2090,7 +2145,7 @@ def _run_models(
 
 	# Run the models one by one and stash the results
 	for model in models_to_run:
-		results = _run_one_model(
+		results = run_one_model(
 			df_multiverse=df_multi,
 			df_sales=df_sales,
 			df_universe=df_univ,
@@ -2106,6 +2161,7 @@ def _run_models(
 			outpath=outpath,
 			save_params=save_params,
 			use_saved_params=use_saved_params,
+			save_results=save_results,
 			use_saved_results=use_saved_results,
 			verbose=verbose
 		)

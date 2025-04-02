@@ -32,8 +32,8 @@ from xgboost import XGBRegressor
 from openavmkit.data import get_sales, simulate_removed_buildings, _enrich_time_field, _enrich_sale_age_days
 from openavmkit.ratio_study import RatioStudy
 from openavmkit.utilities.format import fancy_format
-from openavmkit.utilities.modeling import GarbageModel, AverageModel, NaiveSqftModel, LocalSqftModel, AssessorModel, \
-  GWRModel, MRAModel, LarsModel
+from openavmkit.utilities.modeling import GarbageModel, AverageModel, NaiveSqftModel, LocalSqftModel, PassThroughModel, \
+  GWRModel, MRAModel, LarsModel, GroundTruthModel
 from openavmkit.utilities.data import clean_column_names, div_field_z_safe
 from openavmkit.utilities.settings import get_valuation_date
 from openavmkit.utilities.stats import quick_median_chd
@@ -55,7 +55,8 @@ PredictionModel = Union[
   NaiveSqftModel,
   LocalSqftModel,
   LarsModel,
-  AssessorModel,
+  PassThroughModel,
+  GroundTruthModel,
   GWRModel,
   str,
   None
@@ -280,6 +281,7 @@ class DataSplit:
     self.train_keys = train_keys
 
     self.train_sizes = np.zeros_like(train_keys)
+
     self.train_he_ids = np.zeros_like(train_keys)
     self.train_land_he_ids = np.zeros_like(train_keys)
     self.train_impr_he_ids = np.zeros_like(train_keys)
@@ -678,6 +680,8 @@ class SingleModelResults:
     df_sales = ds.df_sales.copy()
     df_test = ds.df_test.copy()
 
+    self.field_prediction = field_prediction
+
     df_univ[field_prediction] = y_pred_univ
 
     df_test[field_prediction] = y_pred_test
@@ -782,14 +786,14 @@ def model_utility_score(model_results: SingleModelResults):
   :rtype: float
   """
   weight_dist_ratio = 1000.00
-  weight_cod = 1.00
+  weight_cod = 1.50
   weight_chd = 1.00
   weight_sales_chase = 7.5
 
   cod = model_results.pred_test.ratio_study.cod
   chd = model_results.chd
 
-  # Is the median ratio over 1.05? Penalize over-estimates; err on the side of under-estimates
+  # Penalize over-estimates; err on the side of under-estimates
   ratio_over_penalty = 2 if model_results.pred_test.ratio_study.median_ratio < 1.05 else 1
 
   # calculate base score
@@ -928,7 +932,74 @@ def run_mra(ds: DataSplit, intercept: bool = True, verbose: bool = False, model:
   return predict_mra(ds, model, timing, verbose)
 
 
-def predict_assessor(ds: DataSplit, assr_model: AssessorModel, timing: TimingData, verbose: bool = False):
+def predict_ground_truth(ds: DataSplit, ground_truth_model: GroundTruthModel, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using a ground truth model.
+
+  Uses the observed field (e.g. sale price) as the "prediction" and compares it against the ground truth field (e.g. true market value in a synthetic model)
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param ground_truth_model: GroundTruthModel instance.
+  :type ground_truth_model: GroundTruthModel
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: SingleModelResults with assessor predictions.
+  :rtype: SingleModelResults
+  """
+  observed_field = ground_truth_model.observed_field
+  ground_truth_field = ground_truth_model.ground_truth_field
+
+  model_name = "ground_truth"
+
+  # predict on test set:
+  timing.start("predict_test")
+  y_pred_test = ds.df_test[observed_field].to_numpy()
+  timing.stop("predict_test")
+
+  # predict on the sales set:
+  timing.start("predict_sales")
+  y_pred_sales = ds.df_sales[observed_field].to_numpy()
+  timing.stop("predict_sales")
+
+  # predict on the universe set:
+  timing.start("predict_univ")
+  y_pred_univ = ds.df_universe[observed_field].to_numpy()# ds.X_univ[observed_field].to_numpy()
+  timing.stop("predict_univ")
+
+  timing.start("predict_multi")
+  if ds.df_multiverse is not None:
+    y_pred_multi = ds.df_multiverse[observed_field].to_numpy()#ds.X_multiverse[observed_field].to_numpy()
+  else:
+    y_pred_multi = None
+  timing.stop("predict_multi")
+
+  timing.stop("total")
+
+  ds = ds.copy()
+  ds.dep_var = ground_truth_field
+  ds.dep_var_test = ground_truth_field
+
+  results = SingleModelResults(
+    ds,
+    "prediction",
+    "he_id",
+    model_name,
+    ground_truth_model,
+    y_pred_test,
+    y_pred_sales,
+    y_pred_univ,
+    timing,
+    verbose=verbose,
+    y_pred_multi=y_pred_multi
+  )
+
+  return results
+
+
+def predict_pass_through(ds: DataSplit, model: PassThroughModel, timing: TimingData, verbose: bool = False):
   """
   Generate predictions using an assessor model.
 
@@ -937,8 +1008,8 @@ def predict_assessor(ds: DataSplit, assr_model: AssessorModel, timing: TimingDat
 
   :param ds: DataSplit object.
   :type ds: DataSplit
-  :param assr_model: AssessorModel instance.
-  :type assr_model: AssessorModel
+  :param model: PassThroughModel instance.
+  :type model: PassThroughModel
   :param timing: TimingData object.
   :type timing: TimingData
   :param verbose: Whether to print verbose output.
@@ -946,12 +1017,10 @@ def predict_assessor(ds: DataSplit, assr_model: AssessorModel, timing: TimingDat
   :returns: SingleModelResults with assessor predictions.
   :rtype: SingleModelResults
   """
-  field = assr_model.field
+  field = model.field
 
   # TODO: genericize this to take any field name and label
   model_name = "assessor"
-  if "truth" in field:
-    model_name = "ground_truth"
 
   if ds.hedonic:
     field = ds.ind_vars[0]
@@ -985,7 +1054,7 @@ def predict_assessor(ds: DataSplit, assr_model: AssessorModel, timing: TimingDat
     "prediction",
     "he_id",
     model_name,
-    assr_model,
+    model,
     y_pred_test,
     y_pred_sales,
     y_pred_univ,
@@ -997,7 +1066,39 @@ def predict_assessor(ds: DataSplit, assr_model: AssessorModel, timing: TimingDat
   return results
 
 
-def run_assessor(ds: DataSplit, verbose: bool = False):
+def run_ground_truth(ds: DataSplit, verbose: bool = False):
+  """
+  Run a ground truth model by performing data splitting and returning predictions.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the ground truth model.
+  :rtype: SingleModelResults
+  """
+  timing = TimingData()
+
+  timing.start("total")
+
+  timing.start("setup")
+  ds.split()
+  timing.stop("setup")
+
+  timing.start("parameter_search")
+  timing.stop("parameter_search")
+
+  timing.start("train")
+  timing.stop("train")
+
+  ground_truth_model = GroundTruthModel(
+    observed_field=ds.dep_var,
+    ground_truth_field=ds.ind_vars[0]
+  )
+  return predict_ground_truth(ds, ground_truth_model, timing, verbose)
+
+
+def run_pass_through(ds: DataSplit, verbose: bool = False):
   """
   Run an assessor model by performing data splitting and returning predictions.
 
@@ -1022,8 +1123,8 @@ def run_assessor(ds: DataSplit, verbose: bool = False):
   timing.start("train")
   timing.stop("train")
 
-  assr_model = AssessorModel(ds.ind_vars[0])
-  return predict_assessor(ds, assr_model, timing, verbose)
+  model = PassThroughModel(ds.ind_vars[0])
+  return predict_pass_through(ds, model, timing, verbose)
 
 
 def predict_kernel(ds: DataSplit, kr: KernelReg, timing: TimingData, verbose: bool = False):
@@ -1717,7 +1818,8 @@ def run_catboost(ds: DataSplit, outpath: str, save_params: bool = False, use_sav
 
   timing.start("setup")
   params["verbose"] = False
-  params["train_dir"] = outpath
+  params["train_dir"] = f"{outpath}/catboost/catboost_info"
+  os.makedirs(params["train_dir"], exist_ok=True)
   cat_vars = [var for var in ds.categorical_vars if var in ds.X_train.columns.values]
   catboost_model = catboost.CatBoostRegressor(**params)
   train_pool = Pool(data=ds.X_train, label=ds.y_train, cat_features=cat_vars)
@@ -2174,8 +2276,8 @@ def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Timing
     df_impr.loc[df_impr["per_impr_sqft"].eq(0), "per_impr_sqft"] = df_impr[f"{location_field}_per_impr_sqft"]
     df_land.loc[df_land["per_land_sqft"].eq(0), "per_land_sqft"] = df_land[f"{location_field}_per_land_sqft"]
 
-    df_sqft_land.to_csv(f"debug_local_sqft_{len(location_fields)}_{location_field}_sqft_land.csv", index=False)
-    df_land.to_csv(f"debug_local_sqft_{len(location_fields)}_{location_field}_land.csv", index=False)
+    # df_sqft_land.to_csv(f"debug_local_sqft_{len(location_fields)}_{location_field}_sqft_land.csv", index=False)
+    # df_land.to_csv(f"debug_local_sqft_{len(location_fields)}_{location_field}_land.csv", index=False)
 
   # any remaining zeroes get filled with the locality-wide median value
   df_impr.loc[df_impr["per_impr_sqft"].eq(0), "per_impr_sqft"] = overall_per_impr_sqft
@@ -2265,7 +2367,12 @@ def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Timing
     X_multi["prediction_land"] = X_multi_vacant["land_area_sqft"] * X_multi_vacant["per_land_sqft"]
     X_multi.loc[X_multi["prediction_impr"].isna() | X_multi["prediction_impr"].eq(0), "prediction_impr"] = overall_per_impr_sqft
     X_multi.loc[X_multi["prediction_land"].isna() | X_multi["prediction_land"].eq(0), "prediction_land"] = overall_per_land_sqft
-    X_multi["prediction"] = np.where(X_multi["bldg_area_finished_sqft"].gt(0), X_multi["prediction_impr"], X_multi["prediction_land"])
+    X_multi["prediction"] = np.where(
+      ~X_multi["bldg_area_finished_sqft"].isna() &
+      X_multi["bldg_area_finished_sqft"].gt(0),
+      X_multi["prediction_impr"],
+      X_multi["prediction_land"]
+    )
     y_pred_multi = X_multi["prediction"].to_numpy()
     X_multi.drop(columns=["prediction_impr", "prediction_land", "prediction", "per_impr_sqft", "per_land_sqft"], inplace=True)
   else:
@@ -2835,9 +2942,6 @@ def _run_local_sqft(ds: DataSplit, location_fields: list[str], sales_chase: floa
 
       data_sqft_impr[f"{location_field}_per_impr_sqft"].append(local_per_impr_sqft)
       data_sqft_land[f"{location_field}_per_land_sqft"].append(local_per_land_sqft)
-
-    for key in data_sqft_impr:
-      print(f"--> {key}: {len(data_sqft_impr[key])}")
 
     # create dataframes from the calculated values
     df_sqft_impr = pd.DataFrame(data=data_sqft_impr)

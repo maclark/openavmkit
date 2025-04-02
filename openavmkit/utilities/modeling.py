@@ -56,7 +56,17 @@ class LarsModel:
     self.impr_adjustments = impr_adjustments
 
 
-class AssessorModel:
+class GroundTruthModel:
+  def __init__(
+      self,
+      observed_field: str,
+      ground_truth_field: str
+  ):
+    self.observed_field = observed_field
+    self.ground_truth_field = ground_truth_field
+
+
+class PassThroughModel:
   def __init__(
     self,
     field: str,

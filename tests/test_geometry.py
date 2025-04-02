@@ -9,7 +9,7 @@ from shapely import Point, Polygon
 
 from openavmkit.data import _perform_spatial_joins
 from openavmkit.modeling import plot_value_surface
-from openavmkit.synthetic.city import make_geo_blocks, make_geo_blocks_raw
+from openavmkit.synthetic.synthetic import make_geo_blocks_raw
 from openavmkit.utilities.assertions import dfs_are_equal
 from openavmkit.utilities.geometry import get_crs, offset_coordinate_miles, create_geo_rect, create_geo_circle, \
   offset_coordinate_km, distance_km, create_geo_rect_shape_km, get_crs_from_lat_lon

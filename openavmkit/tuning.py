@@ -116,7 +116,7 @@ def tune_lightgbm(X, y, sizes, he_ids, n_trials=100, n_splits=5, random_state=42
 
 
 
-def tune_catboost(X, y, sizes, he_ids, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False):
+def tune_catboost(X, y, sizes, he_ids, n_trials=100, n_splits=5, random_state=42, cat_vars=None, verbose=False, outpath=None):
     """
     Tunes CatBoost hyperparameters using Optuna and rolling-origin cross-validation.
 
@@ -153,6 +153,8 @@ def tune_catboost(X, y, sizes, he_ids, n_trials=100, n_splits=5, random_state=42
             "random_seed": random_state,
             "verbose": 0  # Suppresses CatBoost output
         }
+        if outpath is not None:
+            params["train_dir"] = f"{outpath}/catboost/catboost_info"
         if params["grow_policy"] == "Lossguide":
             params["max_leaves"] = trial.suggest_int("max_leaves", 31, 128)
 

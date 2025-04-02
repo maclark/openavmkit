@@ -26,6 +26,35 @@ class SyntheticData:
 		self.time_bldg_mult = time_bldg_mult
 
 
+def generate_depreciation_curve(
+		lifetime: int = 60,
+		weight_linear: float = 0.2,
+		weight_logistic: float = 0.8,
+		steepness: float = 0.3,
+		inflection_point: int = 20,
+):
+	"""
+	Generates a depreciation curve based on the specified parameters.
+	"""
+
+	depreciation = np.zeros(lifetime)
+
+	for i in range(0, lifetime):
+		# linear depreciation
+		linear = (lifetime - i) / lifetime
+
+		# logistic depreciation
+		logistic = 1 / (1 + np.exp(steepness * (i - inflection_point)))
+
+		# combine the two curves
+		y_combined = ((weight_linear * linear) + (weight_logistic * logistic))/(weight_linear+weight_logistic)
+
+		depreciation[i] = y_combined
+
+	return depreciation
+
+
+
 def generate_inflation_curve(
 		start_year: int,
 		end_year: int,
