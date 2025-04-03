@@ -577,12 +577,12 @@ def _predict_one_model(
   """
 	model_name = model
 	out_pickle = f"{outpath}/model_{model_name}.pickle"
+	ds = smr.ds
 	if use_saved_results and os.path.exists(out_pickle):
 		with open(out_pickle, "rb") as file:
 			results = pickle.load(file)
 		return results
 
-	ds = smr.ds
 	timing = TimingData()
 	timing.start("total")
 
@@ -644,7 +644,7 @@ def _predict_one_model(
 	return results
 
 
-def _get_data_split_for(
+def get_data_split_for(
 		name: str,
 		model_group: str,
 		location_fields: list[str] | None,
@@ -660,6 +660,7 @@ def _get_data_split_for(
 		train_keys: list[str],
 		vacant_only: bool,
 		hedonic: bool,
+		hedonic_test_against_vacant_sales: bool = True,
 		df_multiverse: pd.DataFrame | None = None
 ):
 	"""
@@ -708,6 +709,9 @@ def _get_data_split_for(
 		_ind_vars = ["true_land_value"] if hedonic else ["true_market_value"]
 	else:
 		_ind_vars = ind_vars
+		if name == "gwr" or name == "kernel":
+			exclude_vars = ["latitude", "longitude", "latitude_norm", "longitude_norm"]
+			_ind_vars = [var for var in _ind_vars if var not in exclude_vars]
 
 	return DataSplit(
 		df_sales,
@@ -842,7 +846,7 @@ def run_one_model(
 			print(f"--> test keys: {len(test_keys)}")
 			print(f"--> train keys: {len(train_keys)}")
 
-	ds = _get_data_split_for(
+	ds = get_data_split_for(
 		name=model_name,
 		model_group=model_group,
 		location_fields=location_fields,
@@ -858,6 +862,7 @@ def run_one_model(
 		train_keys=train_keys,
 		vacant_only=vacant_only,
 		hedonic=hedonic,
+		hedonic_test_against_vacant_sales=True,
 		df_multiverse=df_multiverse
 	)
 
@@ -905,6 +910,64 @@ def run_one_model(
 		pickle.dump(results, file)
 
 	return results
+
+
+def run_one_hedonic_model(
+		df_multiverse: pd.DataFrame,
+		df_sales: pd.DataFrame,
+		df_univ: pd.DataFrame,
+		settings: dict,
+		model: str,
+		smr: SingleModelResults,
+		model_group: str,
+		dep_var: str,
+		dep_var_test: str,
+		fields_cat: list[str],
+		outpath: str,
+		hedonic_test_against_vacant_sales: bool = True,
+		use_saved_results: bool = False,
+		verbose: bool = False
+):
+	location_field_neighborhood = get_important_field(settings, "loc_neighborhood", df_sales)
+	location_field_market_area = get_important_field(settings, "loc_market_area", df_sales)
+	location_fields = [location_field_neighborhood, location_field_market_area]
+
+	ds = get_data_split_for(
+		name=model,
+		model_group=model_group,
+		location_fields=location_fields,
+		ind_vars=smr.ind_vars,
+		df_sales=df_sales,
+		df_universe=df_univ,
+		settings=settings,
+		dep_var=dep_var,
+		dep_var_test=dep_var_test,
+		fields_cat=fields_cat,
+		interactions=smr.ds.interactions.copy(),
+		test_keys=smr.ds.test_keys,
+		train_keys=smr.ds.train_keys,
+		vacant_only=False,
+		hedonic=True,
+		hedonic_test_against_vacant_sales=hedonic_test_against_vacant_sales,
+		df_multiverse=df_multiverse
+	)
+	# We call this here because we are re-running prediction without first calling run(), which would call this
+	ds.split()
+	if hedonic_test_against_vacant_sales and len(ds.y_sales) < 15:
+		print(f"Skipping hedonic model because there are not enough sale records...")
+		return None
+	smr.ds = ds
+	results = _predict_one_model(
+		smr=smr,
+		model=model,
+		outpath=outpath,
+		settings=settings,
+		use_saved_results=use_saved_results,
+		verbose=verbose
+	)
+	return results
+
+
 
 
 def _assemble_model_results(results: SingleModelResults, settings: dict):
@@ -993,6 +1056,9 @@ def _write_model_results(results: SingleModelResults, outpath: str, settings: di
 		if "geometry" in df:
 			df = df.drop(columns=["geometry"])
 		df.to_csv(f"{path}/pred_{key}.csv", index=False)
+
+	results.df_sales.to_csv(f"{path}/sales.csv", index=False)
+	results.df_universe.to_csv(f"{path}/universe.csv", index=False)
 
 
 def _write_ensemble_model_results(
@@ -1969,7 +2035,7 @@ def _run_hedonic_models(
 		if model not in all_results.model_results:
 			continue
 		smr = all_results.model_results[model]
-		ds = _get_data_split_for(
+		ds = get_data_split_for(
 			name=model,
 			model_group=model_group,
 			location_fields=location_fields,
@@ -1985,12 +2051,13 @@ def _run_hedonic_models(
 			train_keys=smr.ds.train_keys,
 			vacant_only=False,
 			hedonic=True,
+			hedonic_test_against_vacant_sales=True,
 			df_multiverse=df_multiverse
 		)
 		# We call this here because we are re-running prediction without first calling run(), which would call this
 		ds.split()
 		if len(ds.y_sales) < 15:
-			print(f"Skipping hedonic model because there are not enough sale records")
+			print(f"Skipping hedonic model because there are not enough sale records....")
 			return
 		smr.ds = ds
 		results = _predict_one_model(

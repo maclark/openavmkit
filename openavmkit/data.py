@@ -1025,6 +1025,8 @@ def _basic_geo_enrichment(gdf: gpd.GeoDataFrame, settings: dict, verbose: bool =
 	gdf_area = gdf.to_crs(get_crs(gdf, "equal_area"))
 	gdf["latitude"] = gdf_latlon.geometry.centroid.y
 	gdf["longitude"] = gdf_latlon.geometry.centroid.x
+	gdf["latitude_norm"] = (gdf["latitude"] - gdf["latitude"].min()) / (gdf["latitude"].max() - gdf["latitude"].min())
+	gdf["longitude_norm"] = (gdf["longitude"] - gdf["longitude"].min()) / (gdf["longitude"].max() - gdf["longitude"].min())
 	if verbose:
 		print(f"--> calculate GIS area of each parcel...")
 	gdf["land_area_gis_sqft"] = gdf_area.geometry.area

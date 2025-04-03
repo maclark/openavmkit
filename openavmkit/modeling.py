@@ -177,6 +177,7 @@ class DataSplit:
       hedonic: bool = False,
       days_field: str = "sale_age_days",
       df_multiverse: pd.DataFrame | None = None,
+      hedonic_test_against_vacant_sales=True,
       init: bool = True):
     """
     Initialize a DataSplit instance by processing and splitting sales and universe data.
@@ -315,6 +316,7 @@ class DataSplit:
     self.one_hot_descendants = {}
     self.vacant_only = vacant_only
     self.hedonic = hedonic
+    self.hedonic_test_against_vacant_sales = hedonic_test_against_vacant_sales
     self.days_field = days_field
     self.split()
 
@@ -367,6 +369,7 @@ class DataSplit:
     ds.train_impr_he_ids = self.train_impr_he_ids.copy()
     ds.vacant_only = self.vacant_only
     ds.hedonic = self.hedonic
+    ds.hedonic_test_against_vacant_sales = self.hedonic_test_against_vacant_sales
     ds.dep_var = self.dep_var
     ds.dep_var_test = self.dep_var_test
     ds.ind_vars = self.ind_vars.copy()
@@ -514,7 +517,7 @@ class DataSplit:
     self.df_test.sort_values(by=self.days_field, ascending=False, inplace=True)
     self.df_train.sort_values(by=self.days_field, ascending=False, inplace=True)
 
-    if self.hedonic:
+    if self.hedonic and self.hedonic_test_against_vacant_sales:
       # if it's a hedonic model, we're predicting land value, and are thus testing against vacant land only:
       # we have to do this here, AFTER the split, to ensure that the selected rows are from the same subsets
 
@@ -1275,8 +1278,17 @@ def run_kernel(ds: DataSplit, outpath: str, save_params: bool = False, use_saved
   u_train = ds.df_train['longitude']
   v_train = ds.df_train['latitude']
   vars_train = (u_train, v_train)
+
   for col in ds.X_train.columns:
+
+    # check if every value is the same:
+    if ds.X_train[col].nunique() == 1:
+      # add a very small amount of random noise
+      # this is to prevent singular matrix errors in the Kernel regression
+      ds.X_train[col] += np.random.normal(0, 1e-6, ds.X_train[col].shape)
+
     vars_train += (ds.X_train[col].to_numpy(),)
+
   X_train = np.column_stack(vars_train)
   y_train = ds.y_train.to_numpy()
   timing.stop("setup")

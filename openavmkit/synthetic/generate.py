@@ -7,8 +7,10 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from openavmkit.benchmark import run_one_model, MultiModelResults, _calc_benchmark
-from openavmkit.data import SalesUniversePair, enrich_time, _perform_canonical_split
+from openavmkit.benchmark import run_one_model, MultiModelResults, _calc_benchmark, get_data_split_for, \
+  run_one_hedonic_model
+from openavmkit.data import SalesUniversePair, enrich_time, _perform_canonical_split, get_important_field, \
+  _basic_geo_enrichment
 from openavmkit.horizontal_equity_study import mark_horizontal_equity_clusters
 from openavmkit.synthetic.synthetic import make_geo_blocks
 from openavmkit.utilities.geometry import get_crs_from_lat_lon
@@ -36,6 +38,7 @@ def trial_simple_plane(params: dict):
 
   gdf["true_land_value"] = add_simple_land_value(gdf, {"curve": land_curve, "base_value": base_value, "size_field": size_field})
   gdf["true_market_value"] = gdf["true_land_value"]
+  gdf = _basic_geo_enrichment(gdf, {})
 
   df_univ = gdf.copy()
 
@@ -86,6 +89,7 @@ def trial_simple_plane_w_buildings(params: dict):
   gdf["true_impr_value"] = add_simple_bldg_value(gdf, {"base_value": params["bldg_value_base"], "size_field": f"bldg_area_finished_sq{units}"})
 
   gdf["true_market_value"] = gdf["true_land_value"] + gdf["true_impr_value"]
+  gdf = _basic_geo_enrichment(gdf, {})
 
   df_univ = gdf.copy()
 
@@ -123,6 +127,8 @@ def run_trials(sup_generator: callable, params: dict, variations: dict):
     print(f"RUNNING TRIALS")
 
   trial_results = {}
+  trial_vacant_results = {}
+  trial_hedonic_results = {}
   sups = {}
 
   i = 0
@@ -136,20 +142,53 @@ def run_trials(sup_generator: callable, params: dict, variations: dict):
     for key in variation:
       p[key] = variation[key]
 
-    p["outpath"] = p["outpath"] + "/" + id
+    outpath = p["outpath"]
+
+    p["outpath"] = outpath + "/main/" + id
+    p["hedonic_outpath"] = outpath + "/hedonic/" + id
     sup = sup_generator(p)
-    results = run_one_trial(sup, p)
+
+    # Calculate % of vacant sales:
+    perc_vacant_sales = sup.sales["vacant_sale"].sum() / len(sup.sales)
+
+    # Run the actual trial:
+    results, hedonic_results = run_one_trial(sup, p)
+
     trial_results[id] = results
+    if hedonic_results is not None:
+      trial_hedonic_results[id] = hedonic_results
+
+    if perc_vacant_sales < 1.0:
+      if perc_vacant_sales > 0.0:
+        p["vacant_only"] = True
+        p["hedonic"] = False
+        p["outpath"] = outpath + "/vacant/" + id + "_vacant"
+        results, _ = run_one_trial(sup, p)
+        trial_vacant_results[id] = results
+
     sups[id] = sup
     i += 1
 
-  outpath = params["outpath"] + "/summary"
+  main_outpath = params["outpath"] + "/summary/main"
+  hedonic_outpath = params["outpath"] + "/summary/hedonic"
+  vacant_outpath = params["outpath"] + "/summary/vacant"
 
-  # pickle the results:
-  # os.makedirs(outpath, exist_ok=True)
-  # pickle_path = f"{outpath}/results.pkl"
-  # with open(pickle_path, "wb") as f:
-  #   pickle.dump(trial_results, f)
+  verbose = True
+
+  write_trial_results(trial_results, sups, main_outpath, "main", verbose=verbose)
+  if len(trial_hedonic_results) > 0:
+    write_trial_results(trial_hedonic_results, sups, hedonic_outpath, "hedonic", verbose=verbose)
+  if len(trial_vacant_results) > 0:
+    write_trial_results(trial_vacant_results, sups, vacant_outpath, "vacant", verbose=verbose)
+
+
+def write_trial_results(
+    trial_results: dict,
+    sups: dict,
+    outpath: str,
+    id: str,
+    verbose: bool = False
+):
 
   df_stats_full: pd.DataFrame | None = None
   df_stats_test: pd.DataFrame | None = None
@@ -163,7 +202,17 @@ def run_trials(sup_generator: callable, params: dict, variations: dict):
   # summarize the results
   for key in trial_results:
     results = trial_results[key]
+    if results is None:
+      continue
     sup = sups[key]
+
+    if verbose:
+      print("")
+      print("************************")
+      print(f"RESULTS FOR: {id} / {key}")
+      print("************************")
+
+      print(results.benchmark.print())
 
     if df_stats_full is None:
       df_stats_full = results.benchmark.df_stats_full
@@ -211,7 +260,6 @@ def run_trials(sup_generator: callable, params: dict, variations: dict):
     sup.universe.to_parquet(f"{outpath}/datasets/{key}_universe.parquet")
 
 
-
 def run_one_trial(sup: SalesUniversePair, params: dict):
   # Get universe and sales
   df_univ = sup.universe
@@ -237,7 +285,7 @@ def run_one_trial(sup: SalesUniversePair, params: dict):
   outpath = params["outpath"]
   verbose = params["verbose"]
   dep_var_test = params.get("dep_var_test", "sale_price")
-
+  dep_var_test_hedonic = params.get("dep_var_test_hedonic", "sale_price")
   model_results = {}
 
   settings = {
@@ -250,6 +298,7 @@ def run_one_trial(sup: SalesUniversePair, params: dict):
 
   vacant_only = params.get("vacant_only", False)
   hedonic = params.get("hedonic", False)
+  hedonic_outpath = params["hedonic_outpath"]
 
   for model in models:
     results = run_one_model(
@@ -271,18 +320,56 @@ def run_one_trial(sup: SalesUniversePair, params: dict):
       save_results=False,
       use_saved_results=False,
       verbose=verbose,
-      hedonic=hedonic,
+      hedonic=False,
       test_keys=test_keys,
       train_keys=train_keys
     )
-    model_results[model] = results
+    if results is not None:
+      model_results[model] = results
+
+  hedonic_results = None
+  if hedonic:
+    hedonic_results = {}
+    hedonic_test_against_vacant_sales = "sale_price" in dep_var_test_hedonic
+    print(f"HEDONIC MODEL: test against : {dep_var_test_hedonic}, test against sales? {hedonic_test_against_vacant_sales}")
+    for model in models:
+      smr = model_results[model]
+      if smr is not None:
+        results = run_one_hedonic_model(
+          df_multiverse=None,
+          df_sales=df_sales,
+          df_univ=df_univ,
+          settings=settings,
+          model=model,
+          smr=smr,
+          model_group="test",
+          dep_var="sale_price",
+          dep_var_test=dep_var_test_hedonic,
+          fields_cat=cat_vars,
+          outpath=hedonic_outpath,
+          hedonic_test_against_vacant_sales=hedonic_test_against_vacant_sales,
+          use_saved_results=False,
+          verbose=verbose
+        )
+        if results is not None:
+          hedonic_results[model] = results
 
   all_results = MultiModelResults(
     model_results=model_results,
     benchmark=_calc_benchmark(model_results)
   )
 
-  return all_results
+  all_hedonic_results = None
+  if hedonic_results is not None:
+    all_hedonic_results = MultiModelResults(
+      model_results=hedonic_results,
+      benchmark=_calc_benchmark(hedonic_results)
+    )
+
+  print(f"all_results = {all_results}")
+  print(f"hedonic_results = {all_hedonic_results}")
+
+  return all_results, all_hedonic_results
 
 
 
