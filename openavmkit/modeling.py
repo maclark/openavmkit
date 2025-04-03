@@ -1238,7 +1238,7 @@ def predict_kernel(ds: DataSplit, kr: KernelReg, timing: TimingData, verbose: bo
     ds,
     "prediction",
     "he_id",
-    "mra",
+    "kernel",
     kr,
     y_pred_test,
     y_pred_sales,
