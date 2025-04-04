@@ -1,4 +1,5 @@
 import random
+import warnings
 from typing import Any
 
 import openavmkit
@@ -133,8 +134,11 @@ def generate_building(self, parcel, utilization, depreciation, year, is_new=True
 def make_geo_blocks(latitude, longitude, block_size_y, block_size_x, blocks: list, units: str, crs: Any)->gpd.GeoDataFrame:
   blocks = make_geo_blocks_raw(latitude, longitude, block_size_y, block_size_x, blocks, units)
   gdf = gpd.GeoDataFrame(data=blocks, geometry="geometry", crs="EPSG:4326")
+  # We supress this warning because actually we DO want the centroid in latitude/longitude here!
+  warnings.filterwarnings("ignore", category=UserWarning, append=True)
   gdf["latitude"] = gdf["geometry"].centroid.y
   gdf["longitude"] = gdf["geometry"].centroid.x
+  warnings.filterwarnings("default", category=UserWarning, append=True)
   gdf = gdf.to_crs(crs)
   return gdf
 

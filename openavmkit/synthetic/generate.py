@@ -366,9 +366,6 @@ def run_one_trial(sup: SalesUniversePair, params: dict):
       benchmark=_calc_benchmark(hedonic_results)
     )
 
-  print(f"all_results = {all_results}")
-  print(f"hedonic_results = {all_hedonic_results}")
-
   return all_results, all_hedonic_results
 
 

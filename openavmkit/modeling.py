@@ -735,6 +735,8 @@ class SingleModelResults:
       if df_univ_valid[col].dtype in ["category", "string"]:
         df_univ_valid[col] = df_univ_valid[col].astype("str")
     pl_df = pl.DataFrame(df_univ_valid)
+
+    # TODO: This might need to be changed to be the $/sqft value rather than the total value
     self.chd = quick_median_chd(pl_df, field_prediction, field_horizontal_equity_id)
     timing.stop("chd")
 
