@@ -63,7 +63,7 @@ class SalesScrutinyStudy:
     for key in stuff:
       df = stuff[key]
       df, cluster_fields = mark_sales_scrutiny_clusters(df, settings)
-      df["ss_id"] = key + "_" + df["ss_id"]
+      df["ss_id"] = key + "_" + df["ss_id"].astype(str)
       per_sqft = ""
       denominator = ""
       if key == "i":
