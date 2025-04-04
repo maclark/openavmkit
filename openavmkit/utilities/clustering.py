@@ -120,7 +120,14 @@ def make_clusters(
 
   fields_used = {}
 
-  # Phase 2: add to the cluster based on each categorical field:
+  # Phase 2: split into vacant and improved:
+  if "is_vacant" in df:
+    df["cluster"] = df["cluster"] + "_" + df["is_vacant"].astype(str)
+    cluster_dict = add_to_cluster_dict(cluster_dict, "boolean", "is_vacant", iteration, df)
+    if verbose:
+      print(f"--> crunching on is_vacant, {len(df['cluster'].unique())} clusters")
+
+  # Phase 3: add to the cluster based on each categorical field:
   for field in fields_categorical:
     if field in df:
       df["cluster"] = df["cluster"] + "_" + df[field].astype(str)
@@ -137,7 +144,7 @@ def make_clusters(
       "bldg_condition_num"
     ]
 
-  # Phase 3: iterate over numeric fields, trying to crunch down whenever possible:
+  # Phase 4: iterate over numeric fields, trying to crunch down whenever possible:
   for entry in fields_numeric:
 
     iteration+=1
@@ -155,10 +162,13 @@ def make_clusters(
     for cluster in clusters:
 
       # get all the rows in this cluster
-      df_sub = df[df["cluster"].eq(cluster)]
+      mask = df["cluster"].eq(cluster)
+      df_sub = df[mask]
+
+      len_sub = mask.sum()
 
       # if the cluster is already too small, skip it
-      if len(df_sub) < min_cluster_size:
+      if len_sub < min_cluster_size:
         continue
 
       # get the field to crunch
@@ -174,10 +184,9 @@ def make_clusters(
           if i % 100 == 0:
             print(f"----> {i}/{len(clusters)}, {i/len(clusters):0.0%} clustering on {cluster}, field = {field}, size = {len(series)}")
         # if we succeeded, update the cluster names with the new breakdowns
-        df_sub.loc[:, "next_cluster"] = df_sub["next_cluster"] + "_" + series.astype(str)
-        df.loc[df["cluster"].eq(cluster), "next_cluster"] = df_sub["next_cluster"].values
-        df_sub["__temp_series__"] = series
-        cluster_dict = add_to_cluster_dict(cluster_dict, "numeric", "__temp_series__", iteration, df_sub, field)
+        df.loc[mask, "next_cluster"] = df.loc[mask, "next_cluster"] + "_" + series.astype(str)
+        df.loc[mask, "__temp_series__"] = series.astype(str)
+        cluster_dict = add_to_cluster_dict(cluster_dict, "numeric", "__temp_series__", iteration, df[mask], field)
         fields_used[field] = True
 
       i += 1
