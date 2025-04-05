@@ -96,6 +96,10 @@ def calc_cod(values: np.ndarray) -> float:
   """
 	if len(values) == 0:
 		return float('nan')
+
+	# Replace negative values with zero:
+	values = np.where(values < 0, 0, values)
+
 	median_value = np.median(values)
 	abs_delta_values = np.abs(values - median_value)
 	avg_abs_deviation = np.sum(abs_delta_values) / len(values)
@@ -133,6 +137,10 @@ def calc_cod_bootstrap(values: np.ndarray, confidence_interval=0.95, iterations=
 	if n == 0:
 		return float('nan'), float('nan'), float('nan')
 	np.random.seed(seed)
+
+	# Replace negative values with zero:
+	values = np.where(values < 0, 0, values)
+
 	median = np.median(values)
 	samples = np.random.choice(values, size=(iterations, n), replace=True)
 	abs_delta_values = np.abs(samples - median)

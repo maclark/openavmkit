@@ -860,8 +860,8 @@ def _boolify_column_in_df(df: pd.DataFrame, field: str):
 
 def _enrich_sup_spatial_lag(sup: SalesUniversePair, settings: dict, verbose: bool = False) -> SalesUniversePair:
 
-	df_sales = sup.sales
-	df_universe = sup.universe
+	df_sales = sup.sales.copy()
+	df_universe = sup.universe.copy()
 
 	df_hydrated = get_hydrated_sales_from_sup(sup)
 
