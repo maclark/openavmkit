@@ -832,6 +832,8 @@ def model_utility_score(model_results: SingleModelResults):
   chd_score = chd * weight_chd
 
   # penalize very low COD's with bad horizontal equity
+  if cod == 0.0:
+    cod = 1e-6
   sales_chase_score = ((1.0/cod) * chd) * weight_sales_chase
   final_score = dist_ratio_score + cod_score + chd_score + sales_chase_score
   return final_score

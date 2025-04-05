@@ -2,6 +2,7 @@ import importlib
 import json
 import os
 import warnings
+import geopandas as gpd
 
 import pandas as pd
 from datetime import datetime
@@ -50,6 +51,22 @@ def get_valuation_date(s: dict):
   # process the date from string to datetime using format YYYY-MM-DD:
   val_date = datetime.strptime(val_date_str, "%Y-%m-%d")
   return val_date
+
+
+def get_center(s: dict, gdf: gpd.GeoDataFrame=None)-> tuple[float, float]:
+  center : dict | None = s.get("locality", {}).get("center", None)
+  if center is not None:
+    if "longitude" not in center or "latitude" not in center:
+      raise ValueError("Could not find both 'longitude' and 'latitude' in 'settings.locality.center'!")
+    latitude = center["latitude"]
+    longitude = center["longitude"]
+    return longitude, latitude
+  elif gdf is not None:
+    # calculate the center of the gdf
+    centroid = gdf.geometry.unary_union.centroid
+    return centroid.x, centroid.y
+  else:
+    raise ValueError("Could not find locality.center in settings!")
 
 
 def get_fields_land(s: dict, df: pd.DataFrame=None):

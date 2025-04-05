@@ -3,6 +3,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Dict, Any, Optional
+from shapely.geometry import Point
 
 import numpy as np
 import pandas as pd
@@ -19,7 +20,7 @@ from openavmkit.utilities.data import combine_dfs, div_field_z_safe, merge_and_s
 from openavmkit.utilities.geometry import get_crs, clean_geometry, identify_irregular_parcels, get_exterior_coords, \
 	geolocate_point_to_polygon
 from openavmkit.utilities.settings import get_fields_categorical, get_fields_impr, get_fields_boolean, \
-	get_fields_numeric, get_model_group_ids, get_fields_date, get_long_distance_unit, get_valuation_date
+	get_fields_numeric, get_model_group_ids, get_fields_date, get_long_distance_unit, get_valuation_date, get_center
 
 from openavmkit.utilities.census import get_creds_from_env_census, init_service_census, match_to_census_blockgroups
 from openavmkit.utilities.census import CensusService
@@ -887,19 +888,19 @@ def _enrich_sup_spatial_lag(sup: SalesUniversePair, settings: dict, verbose: boo
 	for value_field in value_fields:
 
 		if value_field == sale_field:
-			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True)]
+			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True)].copy()
 		elif value_field == sale_field_vacant:
-			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True) & df_hydrated["bldg_area_finished_sqft"].le(0) & df_hydrated["land_area_sqft"].gt(0)]
+			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True) & df_hydrated["bldg_area_finished_sqft"].le(0) & df_hydrated["land_area_sqft"].gt(0)].copy()
 		elif value_field == per_land_field:
-			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True) & df_hydrated["bldg_area_finished_sqft"].le(0) & df_hydrated["land_area_sqft"].gt(0)]
+			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True) & df_hydrated["bldg_area_finished_sqft"].le(0) & df_hydrated["land_area_sqft"].gt(0)].copy()
 		elif value_field == per_impr_field:
-			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True) & df_hydrated["bldg_area_finished_sqft"].gt(0)]
+			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True) & df_hydrated["bldg_area_finished_sqft"].gt(0)].copy()
 		else:
 			raise ValueError(f"Unknown value field: {value_field}")
 
 		if df_sub.empty:
-			df_universe[f"spatial_lag_{value_field}"] = np.nan
-			df_sales[f"spatial_lag_{value_field}"] = np.nan
+			df_universe[f"spatial_lag_{value_field}"] = 0
+			df_sales[f"spatial_lag_{value_field}"] = 0
 			continue
 
 		# Build a cKDTree from df_sales coordinates
@@ -942,6 +943,9 @@ def _enrich_sup_spatial_lag(sup: SalesUniversePair, settings: dict, verbose: boo
 
 		# Add the spatial lag as a new column
 		df_universe[f"spatial_lag_{value_field}"] = spatial_lag
+
+		median_value = df_sub[value_field].median()
+		df_universe[f"spatial_lag_{value_field}"].fillna(median_value, inplace=True)
 
 		# Add the new field to sales:
 		df_sales = df_sales.merge(df_universe[["key", f"spatial_lag_{value_field}"]], on="key", how="left")
@@ -1098,6 +1102,33 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
 	return gdf_merged
 
 
+def _enrich_polar_coordinates(gdf_in: gpd.GeoDataFrame, settings: dict, verbose: bool = False) -> gpd.GeoDataFrame:
+	gdf = gdf_in[["key", "geometry"]].copy()
+
+	longitude, latitude = get_center(settings, gdf)
+
+	crs = get_crs(gdf, "equal_area")
+	gdf = gdf.to_crs(crs)
+
+	# convert longitude, latitude, to same point space as gdf:
+	point = Point(longitude, latitude)
+	single_point_gdf = gpd.GeoDataFrame({'geometry': [point]}, crs=gdf_in.crs)
+	single_point_gdf = single_point_gdf.to_crs(crs)
+
+	x_center = single_point_gdf.geometry.x.iloc[0]
+	y_center = single_point_gdf.geometry.y.iloc[0]
+
+	gdf["x_diff"] = gdf.geometry.centroid.x - x_center
+	gdf["y_diff"] = gdf.geometry.centroid.y - y_center
+
+	gdf['polar_radius'] = np.sqrt(gdf['x_diff']**2 + gdf['y_diff']**2)
+	gdf['polar_angle'] = np.arctan2(gdf['y_diff'], gdf['x_diff'])
+	gdf['polar_angle'] = np.degrees(gdf['polar_angle'])
+
+	gdf_result = gdf_in.merge(gdf[["key", "polar_radius", "polar_angle"]], on="key", how="left")
+	return gdf_result
+
+
 def _basic_geo_enrichment(gdf: gpd.GeoDataFrame, settings: dict, verbose: bool = False) -> gpd.GeoDataFrame:
 	"""
   Perform basic geometric enrichment on a GeoDataFrame by adding spatial features.
@@ -1135,6 +1166,7 @@ def _basic_geo_enrichment(gdf: gpd.GeoDataFrame, settings: dict, verbose: bool =
 		print(f"--> counting vertices per parcel...")
 	gdf["geom_vertices"] = gdf.geometry.apply(get_exterior_coords)
 	gdf = _calc_geom_stuff(gdf, verbose)
+	gdf = _enrich_polar_coordinates(gdf, settings, verbose)
 	return gdf
 
 
