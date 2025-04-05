@@ -9,18 +9,19 @@ from statsmodels.nonparametric.kernel_regression import KernelReg
 from xgboost import XGBRegressor
 
 from openavmkit.data import get_important_field, get_locations, _read_split_keys, SalesUniversePair, \
-	get_hydrated_sales_from_sup, get_report_locations, get_sales
+	get_hydrated_sales_from_sup, get_report_locations, get_sales, get_sale_field
 from openavmkit.modeling import run_mra, run_gwr, run_xgboost, run_lightgbm, run_catboost, SingleModelResults, \
 	run_garbage, run_average, run_naive_sqft, predict_garbage, \
 	run_kernel, run_local_sqft, run_pass_through, predict_average, predict_naive_sqft, predict_local_sqft, \
 	predict_pass_through, predict_kernel, predict_gwr, predict_xgboost, predict_catboost, predict_lightgbm, \
-	GarbageModel, AverageModel, DataSplit, predict_lars, run_ground_truth, predict_ground_truth
+	GarbageModel, AverageModel, DataSplit, predict_lars, run_ground_truth, predict_ground_truth, run_spatial_lag, \
+	predict_spatial_lag
 from openavmkit.reports import MarkdownReport, _markdown_to_pdf
 from openavmkit.time_adjustment import enrich_time_adjustment
 from openavmkit.utilities.data import div_z_safe, dataframe_to_markdown
 from openavmkit.utilities.format import fancy_format
 from openavmkit.utilities.modeling import NaiveSqftModel, LocalSqftModel, PassThroughModel, GWRModel, MRAModel, \
-	LarsModel, GroundTruthModel
+	LarsModel, GroundTruthModel, SpatialLagModel
 from openavmkit.utilities.settings import get_fields_categorical, get_variable_interactions, get_valuation_date, \
 	get_model_group, apply_dd_to_df_rows, get_model_group_ids
 from openavmkit.utilities.stats import calc_vif_recursive_drop, calc_t_values_recursive_drop, \
@@ -446,11 +447,11 @@ def _calc_benchmark(model_results: dict[str, SingleModelResults]):
 		"rmse": [],
 		"r2": [],
 		"adj_r2": [],
+		"prd": [],
+		"prb": [],
 		"median_ratio": [],
 		"cod": [],
 		"cod_trim": [],
-		"prd": [],
-		"prb": [],
 		"chd": []
 	}
 	for key in model_results:
@@ -613,8 +614,11 @@ def _predict_one_model(
 		assr_model: PassThroughModel = smr.model
 		results = predict_pass_through(ds, assr_model, timing, verbose)
 	elif model_name == "ground_truth":
-		assr_model: GroundTruthModel = smr.model
-		results = predict_ground_truth(ds, assr_model, timing, verbose)
+		ground_truth_model: GroundTruthModel = smr.model
+		results = predict_ground_truth(ds, ground_truth_model, timing, verbose)
+	elif model_name == "spatial_lag" or model_name == "spatial_lag_sqft":
+		lag_model: SpatialLagModel = smr.model
+		results = predict_spatial_lag(ds, lag_model, timing, verbose)
 	elif model_name == "mra":
 		# MRA is a special case where we have to call run_ instead of predict_, because there's delicate state mangling.
 		# We pass the pretrained `model` object to run_mra() to get it to skip training and move straight to prediction
@@ -707,6 +711,15 @@ def get_data_split_for(
 		_ind_vars = ["assr_land_value"] if hedonic else ["assr_market_value"]
 	elif name == "ground_truth":
 		_ind_vars = ["true_land_value"] if hedonic else ["true_market_value"]
+	elif name == "spatial_lag":
+		sale_field = get_sale_field(settings)
+		field = f"spatial_lag_{sale_field}"
+		if vacant_only or hedonic:
+			field = f"{field}_vacant"
+		_ind_vars = [field]
+	elif name == "spatial_lag_sqft":
+		sale_field = get_sale_field(settings)
+		_ind_vars = [f"spatial_lag_{sale_field}_impr_sqft", f"spatial_lag_{sale_field}_land_sqft", "bldg_area_finished_sqft", "land_area_sqft"]
 	else:
 		_ind_vars = ind_vars
 		if name == "gwr" or name == "kernel":
@@ -727,7 +740,8 @@ def get_data_split_for(
 		train_keys,
 		vacant_only=vacant_only,
 		hedonic=hedonic,
-		df_multiverse=df_multiverse
+		df_multiverse=df_multiverse,
+		hedonic_test_against_vacant_sales=hedonic_test_against_vacant_sales
 	)
 
 
@@ -840,11 +854,6 @@ def run_one_model(
 
 	if test_keys is None or train_keys is None:
 		test_keys, train_keys = _read_split_keys(model_group)
-	else:
-		if verbose:
-			print(f"--> using provided test/train keys")
-			print(f"--> test keys: {len(test_keys)}")
-			print(f"--> train keys: {len(train_keys)}")
 
 	ds = get_data_split_for(
 		name=model_name,
@@ -889,6 +898,10 @@ def run_one_model(
 		results = run_pass_through(ds, verbose=verbose)
 	elif model_name == "ground_truth":
 		results = run_ground_truth(ds, verbose=verbose)
+	elif model_name == "spatial_lag":
+		results = run_spatial_lag(ds, per_sqft=False, verbose=verbose)
+	elif model_name == "spatial_lag_sqft":
+		results = run_spatial_lag(ds, per_sqft=True, verbose=verbose)
 	elif model_name == "mra":
 		results = run_mra(ds, intercept=intercept, verbose=verbose)
 	elif model_name == "kernel":

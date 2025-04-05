@@ -9,6 +9,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import geopandas as gpd
 from pandas import Series
+from scipy.spatial._ckdtree import cKDTree
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
@@ -584,11 +585,13 @@ def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str, pd
 			# Handle Census enrichment for universe if enabled
 			if supkey == "universe" and "census" in s_enrich_local:
 				df = _enrich_df_census(df, s_enrich_local.get("census", {}), verbose=verbose)
-			
+
 			df = _enrich_df_geometry(df, s_enrich_local, dataframes, settings, supkey == "sales", verbose=verbose)
 			df = _enrich_df_basic(df, s_enrich_local, dataframes, settings, supkey == "sales", verbose=verbose)
 
 		sup.set(supkey, df)
+
+		sup = _enrich_sup_spatial_lag(sup, verbose=verbose)
 
 	return sup
 
@@ -852,6 +855,100 @@ def _boolify_column_in_df(df: pd.DataFrame, field: str):
 	series = _boolify_series(series)
 	df[field] = series
 	return df
+
+
+def _enrich_sup_spatial_lag(sup: SalesUniversePair, settings: dict, verbose: bool = False) -> SalesUniversePair:
+
+	df_sales = sup.sales
+	df_universe = sup.universe
+
+	df_hydrated = get_hydrated_sales_from_sup(sup)
+
+	sale_field = get_sale_field(settings)
+	sale_field_vacant = f"{sale_field}_vacant"
+
+	per_land_field = f"{sale_field}_land_sqft"
+	per_impr_field = f"{sale_field}_impr_sqft"
+
+	if per_land_field not in df_hydrated:
+		df_hydrated[per_land_field] = div_field_z_safe(df_hydrated[sale_field], df_hydrated["land_area_sqft"])
+		df_sales[per_land_field] = div_field_z_safe(df_sales[sale_field], df_sales["land_area_sqft"])
+	if per_impr_field not in df_hydrated:
+		df_hydrated[per_impr_field] = div_field_z_safe(df_hydrated[sale_field], df_hydrated["bldg_area_finished_sqft"])
+		df_sales[per_impr_field] = div_field_z_safe(df_sales[sale_field], df_sales["bldg_area_finished_sqft"])
+	if sale_field_vacant not in df_hydrated:
+		df_hydrated[sale_field_vacant] = None
+		df_sales[sale_field_vacant] = None
+		df_hydrated[sale_field_vacant] = df_hydrated[sale_field].where(df_hydrated["bldg_area_finished_sqft"].le(0) & df_hydrated["land_area_sqft"].gt(0))
+		df_sales[sale_field_vacant] = df_sales[sale_field].where(df_sales["bldg_area_finished_sqft"].le(0) & df_sales["land_area_sqft"].gt(0))
+
+	value_fields = [sale_field, sale_field_vacant, per_land_field, per_impr_field]
+
+	for value_field in value_fields:
+
+		if value_field == sale_field:
+			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True)]
+		elif value_field == sale_field_vacant:
+			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True) & df_hydrated["bldg_area_finished_sqft"].le(0) & df_hydrated["land_area_sqft"].gt(0)]
+		elif value_field == per_land_field:
+			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True) & df_hydrated["bldg_area_finished_sqft"].le(0) & df_hydrated["land_area_sqft"].gt(0)]
+		elif value_field == per_impr_field:
+			df_sub = df_hydrated.loc[df_hydrated["valid_sale"].eq(True) & df_hydrated["bldg_area_finished_sqft"].gt(0)]
+		else:
+			raise ValueError(f"Unknown value field: {value_field}")
+
+		if df_sub.empty:
+			df_universe[f"spatial_lag_{value_field}"] = np.nan
+			df_sales[f"spatial_lag_{value_field}"] = np.nan
+			continue
+
+		# Build a cKDTree from df_sales coordinates
+		sales_coords = df_sub[['latitude', 'longitude']].values
+		sales_tree = cKDTree(sales_coords)
+
+		# Choose the number of nearest neighbors to use
+		k = 5  # You can adjust this number as needed
+
+		# Get the coordinates for the universe parcels
+		universe_coords = df_universe[['latitude', 'longitude']].values
+
+		# Query the tree: for each parcel in df_universe, find the k nearest sales
+		# distances: shape (n_universe, k); indices: corresponding indices in df_sales
+		distances, indices = sales_tree.query(universe_coords, k=k)
+
+		# Ensure that distances and indices are 2D arrays (if k==1, reshape them)
+		if k == 1:
+			distances = distances[:, None]
+			indices = indices[:, None]
+
+		# For each universe parcel, compute sigma as the mean distance to its k neighbors.
+		sigma = distances.mean(axis=1, keepdims=True)
+
+		# Handle zeros in sigma
+		sigma[sigma == 0] = np.finfo(float).eps  # Avoid division by zero
+
+		# Compute Gaussian kernel weights for all neighbors
+		weights = np.exp(- (distances ** 2) / (2 * sigma ** 2))
+
+		# Normalize the weights so that they sum to 1 for each parcel
+		weights_norm = weights / weights.sum(axis=1, keepdims=True)
+
+		# Get the sales prices corresponding to the neighbor indices
+		sales_prices = df_sub[value_field].values
+		neighbor_prices = sales_prices[indices]  # shape (n_universe, k)
+
+		# Compute the weighted average (spatial lag) for each parcel in the universe
+		spatial_lag = (np.asarray(weights_norm) * np.asarray(neighbor_prices)).sum(axis=1)
+
+		# Add the spatial lag as a new column
+		df_universe[f"spatial_lag_{value_field}"] = spatial_lag
+
+		# Add the new field to sales:
+		df_sales = df_sales.merge(df_universe[["key", f"spatial_lag_{value_field}"]], on="key", how="left")
+
+	sup.set("sales", df_sales)
+	sup.set("universe", df_universe)
+	return sup
 
 
 def _enrich_df_basic(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: dict[str, pd.DataFrame], settings: dict, is_sales: bool = False, verbose: bool = False) -> pd.DataFrame:

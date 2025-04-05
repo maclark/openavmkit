@@ -146,7 +146,14 @@
 				"land_area_delta_from_median_sqft",
 				"geom_rectangularity_num",
 				"land_area_given_sqft",
-				"geom_aspect_ratio"
+				"geom_aspect_ratio",
+				"spatial_lag_sale_price",
+				"spatial_lag_sale_price_vacant",
+				"spatial_lag_sale_price_impr_sqft",
+				"spatial_lag_sale_price_land_sqft",
+				"spatial_lag_sale_price_time_adj",
+				"spatial_lag_sale_price_time_adj_impr_sqft",
+				"spatial_lag_sale_price_time_adj_land_sqft"
 			],
 			"+categorical": [
 				"land_class",

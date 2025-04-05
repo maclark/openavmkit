@@ -33,7 +33,7 @@ from openavmkit.data import get_sales, simulate_removed_buildings, _enrich_time_
 from openavmkit.ratio_study import RatioStudy
 from openavmkit.utilities.format import fancy_format
 from openavmkit.utilities.modeling import GarbageModel, AverageModel, NaiveSqftModel, LocalSqftModel, PassThroughModel, \
-  GWRModel, MRAModel, LarsModel, GroundTruthModel
+  GWRModel, MRAModel, LarsModel, GroundTruthModel, SpatialLagModel
 from openavmkit.utilities.data import clean_column_names, div_field_z_safe
 from openavmkit.utilities.settings import get_valuation_date
 from openavmkit.utilities.stats import quick_median_chd
@@ -56,6 +56,7 @@ PredictionModel = Union[
   LocalSqftModel,
   LarsModel,
   PassThroughModel,
+  SpatialLagModel,
   GroundTruthModel,
   GWRModel,
   str,
@@ -1028,6 +1029,126 @@ def predict_ground_truth(ds: DataSplit, ground_truth_model: GroundTruthModel, ti
   return results
 
 
+def predict_spatial_lag(ds: DataSplit, model: SpatialLagModel, timing: TimingData, verbose: bool = False):
+  """
+  Generate predictions using a spatial lag model.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param model: SpatialLagModel instance.
+  :type model: SpatialLagModel
+  :param timing: TimingData object.
+  :type timing: TimingData
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: SingleModelResults with spatial lag predictions.
+  :rtype: SingleModelResults
+  """
+
+  if model.per_sqft == False:
+    field = ds.ind_vars[0]
+
+    # predict on test set:
+    timing.start("predict_test")
+    y_pred_test = ds.X_test[field].to_numpy()
+    timing.stop("predict_test")
+
+    # predict on the sales set:
+    timing.start("predict_sales")
+    y_pred_sales = ds.X_sales[field].to_numpy()
+    timing.stop("predict_sales")
+
+    # predict on the universe set:
+    timing.start("predict_univ")
+    y_pred_univ = ds.X_univ[field].to_numpy()
+    timing.stop("predict_univ")
+
+    timing.start("predict_multi")
+    if ds.df_multiverse is not None:
+      y_pred_multi = ds.X_multiverse[field].to_numpy()
+    else:
+      y_pred_multi = None
+    timing.stop("predict_multi")
+  else:
+    field_impr_sqft = ""
+    field_land_sqft = ""
+    for field in ds.ind_vars:
+      if "spatial_lag" in field:
+        if "impr_sqft" in field:
+          field_impr_sqft = field
+        if "land_sqft" in field:
+          field_land_sqft = field
+    if field_impr_sqft == "":
+      raise ValueError("No field found for spatial lag with 'impr_sqft'")
+    if field_land_sqft == "":
+      raise ValueError("No field found for spatial lag with 'land_sqft'")
+
+    # predict on test set:
+    timing.start("predict_test")
+    idx_vacant_test = ds.X_test["bldg_area_finished_sqft"].le(0)
+    y_pred_test = ds.X_test[field_impr_sqft].to_numpy() * ds.X_test["bldg_area_finished_sqft"].to_numpy()
+    y_pred_test[idx_vacant_test] = (
+        ds.X_test[field_land_sqft].to_numpy()[idx_vacant_test] *
+        ds.X_test["land_area_sqft"].to_numpy()[idx_vacant_test]
+    )
+    timing.stop("predict_test")
+
+    # predict on the sales set:
+    timing.start("predict_sales")
+    idx_vacant_sales = ds.X_sales["bldg_area_finished_sqft"].le(0)
+    y_pred_sales = ds.X_sales[field_impr_sqft].to_numpy() * ds.X_sales["bldg_area_finished_sqft"].to_numpy()
+    y_pred_sales[idx_vacant_sales] = (
+        ds.X_sales[field_land_sqft].to_numpy()[idx_vacant_sales] *
+        ds.X_sales["land_area_sqft"].to_numpy()[idx_vacant_sales]
+    )
+    timing.stop("predict_sales")
+
+    # predict on the universe set:
+    timing.start("predict_univ")
+    idx_vacant_univ = ds.X_univ["bldg_area_finished_sqft"].le(0)
+    y_pred_univ = ds.X_univ[field_impr_sqft].to_numpy() * ds.X_univ["bldg_area_finished_sqft"].to_numpy()
+    y_pred_univ[idx_vacant_univ] = (
+        ds.X_univ[field_land_sqft].to_numpy()[idx_vacant_univ] *
+        ds.X_univ["land_area_sqft"].to_numpy()[idx_vacant_univ]
+    )
+    timing.stop("predict_univ")
+
+    # predict on the multiverse set:
+    timing.start("predict_multi")
+    if ds.df_multiverse is not None:
+      idx_vacant_multi = ds.X_multiverse["bldg_area_finished_sqft"].le(0)
+      y_pred_multi = ds.X_multiverse[field_impr_sqft].to_numpy() * ds.X_multiverse["bldg_area_finished_sqft"].to_numpy()
+      y_pred_multi[idx_vacant_multi] = (
+          ds.X_multiverse[field_land_sqft].to_numpy()[idx_vacant_multi] *
+          ds.X_multiverse["land_area_sqft"].to_numpy()[idx_vacant_multi]
+      )
+    else:
+      y_pred_multi = None
+    timing.stop("predict_multi")
+
+  timing.stop("total")
+
+  name = "spatial_lag"
+  if model.per_sqft:
+    name = "spatial_lag_per_sqft"
+
+  results = SingleModelResults(
+    ds,
+    "prediction",
+    "he_id",
+    name,
+    model,
+    y_pred_test,
+    y_pred_sales,
+    y_pred_univ,
+    timing,
+    verbose=verbose,
+    y_pred_multi=y_pred_multi
+  )
+
+  return results
+
+
 def predict_pass_through(ds: DataSplit, model: PassThroughModel, timing: TimingData, verbose: bool = False):
   """
   Generate predictions using an assessor model.
@@ -1125,6 +1246,37 @@ def run_ground_truth(ds: DataSplit, verbose: bool = False):
     ground_truth_field=ds.ind_vars[0]
   )
   return predict_ground_truth(ds, ground_truth_model, timing, verbose)
+
+
+def run_spatial_lag(ds: DataSplit, per_sqft: bool = False, verbose: bool = False):
+  """
+  Run a spatial lag model by performing data splitting and returning predictions.
+
+  :param ds: DataSplit object.
+  :type ds: DataSplit
+  :param per_sqft: Whether to normalize the model by sqft.
+  :type per_sqft: bool, optional
+  :param verbose: Whether to print verbose output.
+  :type verbose: bool, optional
+  :returns: Prediction results from the spatial lag model.
+  :rtype: SingleModelResults
+  """
+  timing = TimingData()
+
+  timing.start("total")
+
+  timing.start("setup")
+  ds.split()
+  timing.stop("setup")
+
+  timing.start("parameter_search")
+  timing.stop("parameter_search")
+
+  timing.start("train")
+  timing.stop("train")
+
+  model = SpatialLagModel(per_sqft=per_sqft)
+  return predict_spatial_lag(ds, model, timing, verbose)
 
 
 def run_pass_through(ds: DataSplit, verbose: bool = False):

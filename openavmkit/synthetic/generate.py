@@ -10,7 +10,7 @@ import pandas as pd
 from openavmkit.benchmark import run_one_model, MultiModelResults, _calc_benchmark, get_data_split_for, \
   run_one_hedonic_model
 from openavmkit.data import SalesUniversePair, enrich_time, _perform_canonical_split, get_important_field, \
-  _basic_geo_enrichment
+  _basic_geo_enrichment, _enrich_sup_spatial_lag
 from openavmkit.horizontal_equity_study import mark_horizontal_equity_clusters
 from openavmkit.synthetic.synthetic import make_geo_blocks
 from openavmkit.utilities.geometry import get_crs_from_lat_lon
@@ -65,6 +65,9 @@ def trial_simple_plane(params: dict):
   # Package as SUP
   sup = SalesUniversePair(df_sales, df_univ)
 
+  # Enrich with spatial lag
+  sup = _enrich_sup_spatial_lag(sup, {})
+
   return sup
 
 
@@ -115,6 +118,9 @@ def trial_simple_plane_w_buildings(params: dict):
 
   # Package as SUP
   sup = SalesUniversePair(df_sales, df_univ)
+
+  # Enrich with spatial lag
+  sup = _enrich_sup_spatial_lag(sup, {})
 
   return sup
 
@@ -330,7 +336,7 @@ def run_one_trial(sup: SalesUniversePair, params: dict):
   hedonic_results = None
   if hedonic:
     hedonic_results = {}
-    hedonic_test_against_vacant_sales = "sale_price" in dep_var_test_hedonic
+    hedonic_test_against_vacant_sales = ("sale_price" in dep_var_test_hedonic)
     print(f"HEDONIC MODEL: test against : {dep_var_test_hedonic}, test against sales? {hedonic_test_against_vacant_sales}")
     for model in models:
       smr = model_results[model]

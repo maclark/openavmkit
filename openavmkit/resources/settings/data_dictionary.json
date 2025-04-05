@@ -758,5 +758,47 @@
 		"description": "Whether the sale is valid",
 		"type": "boolean",
 		"groups": ["sale"]
+	},
+	"spatial_lag_sale_price": {
+		"name": "Local price trend",
+		"description": "Weighted average of nearby sale prices",
+		"type": "number",
+		"groups": ["location"]
+	},
+	"spatial_lag_sale_price_vacant": {
+		"name": "Local vacant lot price trend",
+		"description": "Weighted average of nearby vacant lot sale prices",
+		"type": "number",
+		"groups": ["location"]
+	},
+	"spatial_lag_sale_price_time_adj": {
+		"name": "Local price trend (time-adjusted)",
+		"description": "Weighted average of nearby time-adjusted sale prices",
+		"type": "number",
+		"groups": ["location"]
+	},
+	"spatial_lag_sale_price_land_sqft": {
+		"name": "Local vacant lot $/land sqft trend",
+		"description": "Weighted average of nearby vacant lot sale prices on a per land sqft basis",
+		"type": "number",
+		"groups": ["location"]
+	},
+	"spatial_lag_sale_price_impr_sqft": {
+		"name": "Local $/impr sqft trend",
+		"description": "Weighted average of nearby sale prices on a per sqft basis",
+		"type": "number",
+		"groups": ["location"]
+	},
+	"spatial_lag_sale_price_time_adj_land_sqft": {
+		"name": "Local vacant lot $/land sqft trend (time-adjusted)",
+		"description": "Weighted average of nearby time-adjusted sale prices on a per land sqft basis",
+		"type": "number",
+		"groups": ["location"]
+	},
+	"spatial_lag_sale_price_time_adj_impr_sqft": {
+		"name": "Local $/impr sqft trend (time-adjusted)",
+		"description": "Weighted average of nearby time-adjusted sale prices on a per sqft basis",
+		"type": "number",
+		"groups": ["location"]
 	}
 }

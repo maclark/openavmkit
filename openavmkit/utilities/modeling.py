@@ -66,6 +66,14 @@ class GroundTruthModel:
     self.ground_truth_field = ground_truth_field
 
 
+class SpatialLagModel:
+  def __init__(
+      self,
+      per_sqft: bool
+  ):
+    self.per_sqft = per_sqft
+
+
 class PassThroughModel:
   def __init__(
     self,
