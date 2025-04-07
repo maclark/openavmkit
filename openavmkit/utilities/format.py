@@ -23,6 +23,8 @@ def fancy_format(num):
     return '0.00'
   if 1 > num > 0:
     return '{:.2f}'.format(num)
+  if -1 < num < 0:
+    return '{:.2f}'.format(num)
   num = float('{:.3g}'.format(num))
   magnitude = 0
   while abs(num) >= 1000 and abs(num) > 1e-6:

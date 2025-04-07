@@ -114,15 +114,10 @@ class LandPredictionResults:
 
     self.land_ratio_study = RatioStudy(land_predictions, sale_prices)
 
-    print(f"total_prediction_field = {total_prediction_field}, in df_univ -> {total_prediction_field in df_univ}")
-    print(f"land_prediction_field = {land_prediction_field}, in df_univ -> {land_prediction_field in df_univ}")
-    print(f"impr_prediction_field = {impr_prediction_field}, in df_univ -> {impr_prediction_field in df_univ}")
-
     df_univ_valid = df_univ.drop(columns="geometry", errors="ignore").copy()
 
     # convert all category and string[python] types to string:
     for col in df_univ_valid.columns:
-      print(f"col = {col}: dtype = {df_univ_valid[col].dtype}")
       if df_univ_valid[col].dtype in ["category", "string"]:
         df_univ_valid[col] = df_univ_valid[col].astype("str")
     pl_df = pl.DataFrame(df_univ_valid)
@@ -163,20 +158,15 @@ class LandPredictionResults:
       )).gt(1e-6)]
     )
     count_land_overshoot = len(df_univ[
-      df_univ[land_prediction_field].gt(df_univ[impr_prediction_field])
+      df_univ[land_prediction_field].gt(df_univ[total_prediction_field])
     ])
     count_vacant_land_not_100 = len(df_univ[
       df_univ["is_vacant"].eq(True) &
       df_univ["land_allocation"].lt(1.0)
     ])
-    count_vacant_land_impr_not_0 = len(df_univ[
-      df_univ["is_vacant"].eq(True) &
-      df_univ["impr_allocation"].gt(0.0)
-    ])
     self.perc_dont_add_up = count_dont_add_up / count
     self.perc_land_overshoot = count_land_overshoot / count
     self.perc_vacant_land_not_100 = count_vacant_land_not_100 / count
-    self.perc_vacant_land_impr_not_0 = count_vacant_land_impr_not_0 / count
 
     # Soft rules
     count_improved_land_over_100 = len(df_univ[

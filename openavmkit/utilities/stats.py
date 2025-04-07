@@ -167,7 +167,12 @@ def calc_prd(predictions: np.ndarray, ground_truth: np.ndarray) -> float:
   """
 	ratios = predictions / ground_truth
 	mean_ratio = np.mean(ratios)
-	weighted_mean_ratio = np.sum(predictions) / np.sum(ground_truth)
+	sum_ground_truth = np.sum(ground_truth)
+	if sum_ground_truth == 0:
+		return float('inf')
+	weighted_mean_ratio = np.sum(predictions) / sum_ground_truth
+	if weighted_mean_ratio == 0:
+		return float('inf')
 	prd = mean_ratio / weighted_mean_ratio
 	return prd
 

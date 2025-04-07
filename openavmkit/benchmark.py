@@ -510,12 +510,14 @@ def _calc_benchmark(model_results: dict[str, SingleModelResults]):
 	return results
 
 
-def _format_benchmark_df(df: pd.DataFrame):
+def _format_benchmark_df(df: pd.DataFrame, transpose: bool = True):
 	"""
   Format a benchmark DataFrame for display.
 
   :param df: The DataFrame to format.
   :type df: pandas.DataFrame
+  :param transpose: If True, transposes the DataFrame.
+  :type transpose: bool, optional
   :returns: A markdown-formatted string representation of the DataFrame.
   :rtype: str
   """
@@ -530,6 +532,7 @@ def _format_benchmark_df(df: pd.DataFrame):
 		"median_ratio": "{:.2f}",
 		"cod": "{:.2f}",
 		"cod_trim": "{:.2f}",
+		"cod\ntrim": "{:.2f}",
 		"prd": "{:.2f}",
 		"prb": "{:.2f}",
 		"total": fancy_format,
@@ -540,16 +543,16 @@ def _format_benchmark_df(df: pd.DataFrame):
 		"multi": fancy_format,
 		"chd": fancy_format,
 		"med_ratio": "{:.2f}",
-		"total_chd": fancy_format,
-		"impr_chd": fancy_format,
-		"land_chd": fancy_format,
-		"null": "{:.2%}",
-		"neg": "{:.2%}",
-		"bad_sum": "{:.2%}",
-		"over": "{:.2%}",
-		"impr_over_100": "{:.2%}",
-		"vac_not_100": "{:.2%}",
-		"vac_impr_not_0": "{:.2%}"
+		"med\nratio": "{:.2f}",
+		"chd\ntotal": fancy_format,
+		"chd\nimpr": fancy_format,
+		"chd\nland": fancy_format,
+		"null": "{:.1%}",
+		"neg": "{:.1%}",
+		"bad\nsum": "{:.1%}",
+		"land\nover": "{:.1%}",
+		"impr\n> 100": "{:.1%}",
+		"vac not\n100": "{:.1%}"
 	}
 
 	for col in df.columns:
@@ -558,7 +561,9 @@ def _format_benchmark_df(df: pd.DataFrame):
 				df[col] = df[col].apply(formats[col])
 			else:
 				df[col] = df[col].apply(lambda x: formats[col].format(x))
-	return df.transpose().to_markdown()
+	if transpose:
+		df = df.transpose()
+	return df.to_markdown()
 
 
 def _predict_one_model(

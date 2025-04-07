@@ -243,16 +243,6 @@ def evaluate_trial_one_land_result(
 ):
   sup = sup.copy()
 
-  pred_test = total_results.pred_test.y_pred
-  pred_sales = total_results.pred_sales.y_pred
-  pred_univ = total_results.pred_univ
-
-
-  land_pred_test = land_results.pred_test.y_pred
-  land_pred_sales = land_results.pred_sales.y_pred
-  land_pred_univ = land_results.pred_univ
-
-
   df_univ = sup.universe
   df_univ["model_market_value"] = total_results.pred_univ
   df_univ["model_land_value"] = land_results.pred_univ
@@ -274,20 +264,19 @@ def evaluate_trial_one_land_result(
     "model": model_id,
     "count": len(df_univ),
     "sales": len(df_sales[df_sales["valid_sale"].eq(True)]),
-    "land_sales": len(df_sales[df_sales["valid_for_land_ratio_study"].eq(True)]),
-    "med_ratio": scores.land_ratio_study.median_ratio,
+    "land\nsales": len(df_sales[df_sales["valid_for_land_ratio_study"].eq(True)]),
+    "med\nratio": scores.land_ratio_study.median_ratio,
     "cod": scores.land_ratio_study.cod,
-    "cod_trim": scores.land_ratio_study.cod_trim,
-    "total_chd": scores.total_chd,
-    "impr_chd": scores.impr_chd,
-    "land_chd": scores.land_chd,
+    "cod\ntrim": scores.land_ratio_study.cod_trim,
+    "chd\ntotal": scores.total_chd,
+    "chd\nimpr": scores.impr_chd,
+    "chd\nland": scores.land_chd,
     "null": scores.perc_land_null,
     "neg": scores.perc_land_negative,
-    "bad_sum": scores.perc_dont_add_up,
-    "over": scores.perc_land_overshoot,
-    "impr_over_100": scores.perc_improved_land_over_100,
-    "vac_not_100": scores.perc_vacant_land_not_100,
-    "vac_impr_not_0": scores.perc_vacant_land_impr_not_0
+    "bad\nsum": scores.perc_dont_add_up,
+    "land\nover": scores.perc_land_overshoot,
+    "impr\n> 100": scores.perc_improved_land_over_100,
+    "vac not\n100": scores.perc_vacant_land_not_100
   }
 
 
@@ -382,8 +371,16 @@ def evaluate_trial_land_results(
     print(f"LAND RESULTS FOR: {trial_id}")
     print("************************")
 
-    #transpose & print
-    print(_format_benchmark_df(df_results.transpose()))
+    fields = ["null", "neg", "bad\nsum", "over", "impr\n> 100", "vac not\n100"]
+    df_results_1 = df_results.drop(columns=fields)
+    df_results_2 = df_results[["model"]+fields]
+
+    # set "model" as index:
+    df_results_1 = df_results_1.set_index("model")
+    print(_format_benchmark_df(df_results_1, transpose=False))
+    print("")
+    df_results_2 = df_results_2.set_index("model")
+    print(_format_benchmark_df(df_results_2, transpose=False))
 
 
 def write_trial_results(
