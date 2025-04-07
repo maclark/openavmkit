@@ -608,7 +608,7 @@ def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str, pd
 
 		sup.set(supkey, df)
 
-		sup = _enrich_sup_spatial_lag(sup, verbose=verbose)
+		sup = _enrich_sup_spatial_lag(sup, settings, verbose=verbose)
 
 	return sup
 
@@ -1096,7 +1096,7 @@ def _enrich_sup_spatial_lag(sup: SalesUniversePair, settings: dict, verbose: boo
 		df_universe[f"spatial_lag_{value_field}"] = spatial_lag
 
 		median_value = df_sub[value_field].median()
-		df_universe[f"spatial_lag_{value_field}"].fillna(median_value, inplace=True)
+		df_universe[f"spatial_lag_{value_field}"] = df_universe[f"spatial_lag_{value_field}"].fillna(median_value)
 
 		# Add the new field to sales:
 		df_sales = df_sales.merge(df_universe[["key", f"spatial_lag_{value_field}"]], on="key", how="left")
