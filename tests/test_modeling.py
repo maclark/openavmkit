@@ -1,11 +1,13 @@
 import os
 
+import pandas as pd
+
 from openavmkit.benchmark import run_models, MultiModelResults
 from openavmkit.cleaning import clean_valid_sales
 from openavmkit.data import enrich_time, _perform_canonical_split, get_hydrated_sales_from_sup, SalesUniversePair
 from openavmkit.horizontal_equity_study import mark_horizontal_equity_clusters, \
 	mark_horizontal_equity_clusters_per_model_group_sup
-from openavmkit.modeling import _run_lars_sqft, DataSplit, run_lars
+from openavmkit.modeling import _run_lars_sqft, DataSplit, run_lars, simple_ols
 from openavmkit.ratio_study import run_and_write_ratio_study_breakdowns
 from openavmkit.sales_scrutiny_study import SalesScrutinyStudy, run_sales_scrutiny
 from openavmkit.synthetic.basic import generate_basic
@@ -13,6 +15,23 @@ from openavmkit.time_adjustment import enrich_time_adjustment
 from openavmkit.utilities.settings import get_valuation_date, load_settings
 
 from IPython.core.display import display
+
+
+def test_simple_ols():
+
+	data = {
+		"a": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+		"b": [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24]
+	}
+	df = pd.DataFrame(data)
+
+	results = simple_ols(df, "a", "b")
+
+	assert results["slope"] - 2.0 < 1e-6
+	assert results["intercept"] - 4.0 < 1e-6
+	assert results["r2"] - 1.0 < 1e-6
+	assert results["adj_r2"] - 1.0 < 1e-6
+
 
 def test_run_lars_sqft():
 	return True
