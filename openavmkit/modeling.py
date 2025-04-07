@@ -29,14 +29,15 @@ from statsmodels.nonparametric.kernel_regression import KernelReg
 from statsmodels.regression.linear_model import RegressionResults
 from xgboost import XGBRegressor
 
-from openavmkit.data import get_sales, simulate_removed_buildings, _enrich_time_field, _enrich_sale_age_days
+from openavmkit.data import get_sales, simulate_removed_buildings, _enrich_time_field, _enrich_sale_age_days, \
+  SalesUniversePair, get_hydrated_sales_from_sup
 from openavmkit.ratio_study import RatioStudy
 from openavmkit.utilities.format import fancy_format
 from openavmkit.utilities.modeling import GarbageModel, AverageModel, NaiveSqftModel, LocalSqftModel, PassThroughModel, \
   GWRModel, MRAModel, LarsModel, GroundTruthModel, SpatialLagModel
 from openavmkit.utilities.data import clean_column_names, div_field_z_safe
 from openavmkit.utilities.settings import get_valuation_date
-from openavmkit.utilities.stats import quick_median_chd
+from openavmkit.utilities.stats import quick_median_chd_pl
 from openavmkit.tuning import tune_lightgbm, tune_xgboost, tune_catboost
 from openavmkit.utilities.timing import TimingData
 
@@ -62,6 +63,140 @@ PredictionModel = Union[
   str,
   None
 ]
+
+
+class LandPredictionResults:
+
+  def __init__(self,
+      land_prediction_field: str,
+      impr_prediction_field: str,
+      total_prediction_field: str,
+      dep_var: str,
+      sup: SalesUniversePair
+  ):
+
+    necessary_fields = [
+      land_prediction_field,
+      impr_prediction_field,
+      total_prediction_field,
+      dep_var,
+      "land_he_id",
+      "impr_he_id",
+      "he_id",
+      "is_vacant",
+      "land_area_sqft",
+      "bldg_area_finished_sqft"
+    ]
+
+    for field in necessary_fields:
+      if field not in sup.universe:
+        raise ValueError(f"Necessary field '{field}' not found in universe DataFrame.")
+
+    df = get_hydrated_sales_from_sup(sup)
+
+    for field in necessary_fields + ["valid_sale", "vacant_sale", "valid_for_land_ratio_study", "valid_for_ratio_study"]:
+      if field not in df:
+        raise ValueError(f"Necessary field '{field}' not found in sales DataFrame.")
+
+    self.land_prediction_field = land_prediction_field
+    self.impr_prediction_field = impr_prediction_field
+    self.total_prediction_field = total_prediction_field
+
+    df_univ = sup.universe.copy()
+
+    df_univ["land_allocation"] = div_field_z_safe(df_univ[land_prediction_field], df_univ[total_prediction_field])
+    df_univ["impr_allocation"] = div_field_z_safe(df_univ[impr_prediction_field], df_univ[total_prediction_field])
+
+    # Phase 1: Accuracy
+    df = df[df["valid_for_ratio_study"].eq(True)].copy()
+    land_predictions = df[land_prediction_field]
+    sale_prices = df[dep_var]
+
+    self.land_ratio_study = RatioStudy(land_predictions, sale_prices)
+
+    print(f"total_prediction_field = {total_prediction_field}, in df_univ -> {total_prediction_field in df_univ}")
+    print(f"land_prediction_field = {land_prediction_field}, in df_univ -> {land_prediction_field in df_univ}")
+    print(f"impr_prediction_field = {impr_prediction_field}, in df_univ -> {impr_prediction_field in df_univ}")
+
+    df_univ_valid = df_univ.drop(columns="geometry", errors="ignore").copy()
+
+    # convert all category and string[python] types to string:
+    for col in df_univ_valid.columns:
+      print(f"col = {col}: dtype = {df_univ_valid[col].dtype}")
+      if df_univ_valid[col].dtype in ["category", "string"]:
+        df_univ_valid[col] = df_univ_valid[col].astype("str")
+    pl_df = pl.DataFrame(df_univ_valid)
+
+    # Phase 2: Consistency
+    self.total_chd = quick_median_chd_pl(pl_df, total_prediction_field, "he_id")
+    self.land_chd = quick_median_chd_pl(pl_df, land_prediction_field, "land_he_id")
+    self.impr_chd = quick_median_chd_pl(pl_df, impr_prediction_field, "impr_he_id")
+
+    # Phase 3: Sanity
+
+    # Hard rules
+    count = len(df_univ)
+    count_land_null = len(df_univ[df_univ[land_prediction_field].isna()])
+    count_land_negative = len(df_univ[df_univ[land_prediction_field].lt(0)])
+    count_land_invalid = len(df_univ[
+      df_univ[land_prediction_field].lt(0) |
+      df_univ[land_prediction_field].isna()
+    ])
+    self.perc_land_null = count_land_null / count
+    self.perc_land_negative = count_land_negative / count
+    self.perc_land_invalid = count_land_invalid / count
+
+    count_impr_null = len(df_univ[df_univ[impr_prediction_field].isna()])
+    count_impr_negative = len(df_univ[df_univ[impr_prediction_field].lt(0)])
+    count_impr_invalid = len(df_univ[
+      df_univ[impr_prediction_field].lt(0) |
+      df_univ[impr_prediction_field].isna()
+    ])
+    self.perc_impr_null = count_impr_null / count
+    self.perc_impr_negative = count_impr_negative / count
+    self.perc_impr_invalid = count_impr_invalid / count
+
+    count_dont_add_up = len(df_univ[(
+      df_univ[total_prediction_field] - np.abs(
+        df_univ[land_prediction_field] +
+        df_univ[impr_prediction_field]
+      )).gt(1e-6)]
+    )
+    count_land_overshoot = len(df_univ[
+      df_univ[land_prediction_field].gt(df_univ[impr_prediction_field])
+    ])
+    count_vacant_land_not_100 = len(df_univ[
+      df_univ["is_vacant"].eq(True) &
+      df_univ["land_allocation"].lt(1.0)
+    ])
+    count_vacant_land_impr_not_0 = len(df_univ[
+      df_univ["is_vacant"].eq(True) &
+      df_univ["impr_allocation"].gt(0.0)
+    ])
+    self.perc_dont_add_up = count_dont_add_up / count
+    self.perc_land_overshoot = count_land_overshoot / count
+    self.perc_vacant_land_not_100 = count_vacant_land_not_100 / count
+    self.perc_vacant_land_impr_not_0 = count_vacant_land_impr_not_0 / count
+
+    # Soft rules
+    count_improved_land_over_100 = len(df_univ[
+      df_univ["is_vacant"].eq(False) &
+      df_univ["land_allocation"].gt(1.0)
+    ])
+    self.perc_improved_land_over_100 = count_improved_land_over_100 / count
+
+    # Paired sales analysis tests:
+    # Control for location:
+    # - Land allocation inversely correlated with floor area ratio
+    # - Land value / sqft decreases as total land size increases
+    # - Land value increases as total land size increases
+    # - Within location, control for one at a time: size/quality/condition:
+    #   - Condition positively correlated with impr value
+    #   - Quality positively correlated with impr value
+    #   - Age *mostly* negatively correlated with impr value
+
+
+
 
 
 class PredictionResults:
@@ -738,7 +873,7 @@ class SingleModelResults:
     pl_df = pl.DataFrame(df_univ_valid)
 
     # TODO: This might need to be changed to be the $/sqft value rather than the total value
-    self.chd = quick_median_chd(pl_df, field_prediction, field_horizontal_equity_id)
+    self.chd = quick_median_chd_pl(pl_df, field_prediction, field_horizontal_equity_id)
     timing.stop("chd")
 
     timing.start("utility")
@@ -3513,3 +3648,22 @@ def plot_value_surface(title: str, values: np.array, gdf: gpd.GeoDataFrame, cmap
   cbar.ax.yaxis.set_major_formatter(FuncFormatter(lambda x, _: fancy_format(x)))
   cbar.set_label("Value ($)", fontsize=12)
   plt.show()
+
+
+def simple_ols(
+    df: pd.DataFrame,
+    ind_var: str,
+    dep_var: str
+):
+  y = df[dep_var].copy()
+  X = df[ind_var].copy()
+  X = sm.add_constant(X)
+  X = X.astype(np.float64)
+  model = sm.OLS(y, X).fit()
+
+  return {
+    "slope": model.params[ind_var],
+    "intercept": model.params["const"],
+    "r2": model.rsquared,
+    "adj_r2": model.rsquared_adj
+  }

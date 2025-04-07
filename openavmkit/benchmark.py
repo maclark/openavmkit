@@ -538,7 +538,18 @@ def _format_benchmark_df(df: pd.DataFrame):
 		"test": fancy_format,
 		"univ": fancy_format,
 		"multi": fancy_format,
-		"chd": fancy_format
+		"chd": fancy_format,
+		"med_ratio": "{:.2f}",
+		"total_chd": fancy_format,
+		"impr_chd": fancy_format,
+		"land_chd": fancy_format,
+		"null": "{:.2%}",
+		"neg": "{:.2%}",
+		"bad_sum": "{:.2%}",
+		"over": "{:.2%}",
+		"impr_over_100": "{:.2%}",
+		"vac_not_100": "{:.2%}",
+		"vac_impr_not_0": "{:.2%}"
 	}
 
 	for col in df.columns:
@@ -1322,6 +1333,53 @@ def _optimize_ensemble_allocation_iteration(
 	return best_score, best_list
 
 
+def run_ensemble(
+		df_sales: pd.DataFrame | None,
+		df_universe: pd.DataFrame | None,
+		model_group: str,
+		vacant_only: bool,
+		dep_var: str,
+		dep_var_test: str,
+		outpath : str,
+		all_results: MultiModelResults,
+		settings: dict,
+		verbose: bool = False,
+		hedonic: bool = False,
+		df_multiverse: pd.DataFrame | None = None,
+		test_keys: list[str] = None,
+		train_keys: list[str] = None
+)->tuple[SingleModelResults, list[str]]:
+	ensemble_list = _optimize_ensemble(
+		df_sales,
+		df_universe,
+		model_group,
+		vacant_only,
+		dep_var,
+		dep_var_test,
+		all_results,
+		settings,
+		verbose=verbose,
+		hedonic=hedonic,
+		ensemble_list=None
+	)
+	ensemble = _run_ensemble(
+		df_sales,
+		df_universe,
+		model_group,
+		vacant_only=vacant_only,
+		hedonic=hedonic,
+		dep_var=dep_var,
+		dep_var_test=dep_var_test,
+		outpath=outpath,
+		ensemble_list=ensemble_list,
+		all_results=all_results,
+		settings=settings,
+		verbose=verbose,
+		df_multiverse=df_multiverse
+	)
+	return ensemble, ensemble_list
+
+
 def _optimize_ensemble(
 		df_sales: pd.DataFrame | None,
 		df_universe: pd.DataFrame | None,
@@ -1333,7 +1391,9 @@ def _optimize_ensemble(
 		settings: dict,
 		verbose: bool = False,
 		hedonic: bool = False,
-		ensemble_list: list[str] = None
+		ensemble_list: list[str] = None,
+		test_keys: list[str] = None,
+		train_keys: list[str] = None
 ):
 	"""
   Optimize the ensemble allocation over all iterations.
@@ -1360,6 +1420,10 @@ def _optimize_ensemble(
   :type hedonic: bool, optional
   :param ensemble_list: Optional list of models to consider.
   :type ensemble_list: list[str] or None
+  :param test_keys: Optional list of test keys (will be read from disk if not provided)
+  :type test_keys: list[str] or None
+  :param train_keys: Optional list of training keys (will be read from disk if not provided)
+  :type train_keys: list[str] or None
   :returns: The best ensemble list.
   :rtype: list[str]
   """
@@ -1367,12 +1431,17 @@ def _optimize_ensemble(
 	timing.start("total")
 	timing.start("setup")
 
+	first_key = list(all_results.model_results.keys())[0]
+	test_keys = all_results.model_results[first_key].ds.test_keys
+	train_keys = all_results.model_results[first_key].ds.train_keys
+
 	if df_sales is None:
-		first_key = list(all_results.model_results.keys())[0]
 		df_universe = all_results.model_results[first_key].ds.df_universe_orig
 		df_sales = all_results.model_results[first_key].ds.df_sales_orig
 
-	test_keys, train_keys = _read_split_keys(model_group)
+	# if test_keys is None or train_keys is None:
+	# 	test_keys, train_keys = _read_split_keys(model_group)
+
 	ds = DataSplit(
 		df_sales,
 		df_universe,
@@ -1529,9 +1598,9 @@ def _run_ensemble(
   :type df_universe: pandas.DataFrame
   :param model_group: Model group identifier.
   :type model_group: str
-  :param vacant_only: Whether to use only vacant sales.
+  :param vacant_only: Whether it is a vacant-only model.
   :type vacant_only: bool
-  :param hedonic: Whether to use hedonic pricing.
+  :param hedonic: Whether it is a hedonic model.
   :type hedonic: bool
   :param dep_var: Dependent variable for training.
   :type dep_var: str
@@ -1556,7 +1625,11 @@ def _run_ensemble(
 	timing.start("total")
 	timing.start("setup")
 
-	test_keys, train_keys = _read_split_keys(model_group)
+	first_key = list(all_results.model_results.keys())[0]
+	test_keys = all_results.model_results[first_key].ds.test_keys
+	train_keys = all_results.model_results[first_key].ds.train_keys
+
+	#test_keys, train_keys = _read_split_keys(model_group)
 	ds = DataSplit(
 		df_sales,
 		df_universe,

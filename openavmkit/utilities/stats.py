@@ -43,13 +43,16 @@ def calc_chds(df_in: pd.DataFrame, field_cluster: str, field_value: str):
 
 	for cluster in clusters:
 		df_cluster = df[df[field_cluster].eq(cluster)]
+		# exclude negative and null values:
+		df_cluster = df_cluster[~pd.isna(df_cluster[field_value]) & df_cluster[field_value].gt(0)]
+
 		chd = calc_cod(df_cluster[field_value].values)
 		df.loc[df[field_cluster].eq(cluster), "chd"] = chd
 
 	return df["chd"]
 
 
-def quick_median_chd(df: pl.DataFrame, field_value: str, field_cluster: str) -> float:
+def quick_median_chd_pl(df: pl.DataFrame, field_value: str, field_cluster: str) -> float:
 	"""
   Calculate the median CHD for groups in a Polars DataFrame.
 
@@ -67,6 +70,7 @@ def quick_median_chd(df: pl.DataFrame, field_value: str, field_cluster: str) -> 
   """
 	# Filter out rows with missing values for field_value.
 	df = df.filter(~pd.isna(df[field_value]))
+	df = df.filter(df[field_value].gt(0))
 
 	chds = (
 		df
@@ -96,9 +100,6 @@ def calc_cod(values: np.ndarray) -> float:
   """
 	if len(values) == 0:
 		return float('nan')
-
-	# Replace negative values with zero:
-	values = np.where(values < 0, 0, values)
 
 	median_value = np.median(values)
 	abs_delta_values = np.abs(values - median_value)
@@ -287,6 +288,8 @@ def calc_prb(predictions: np.ndarray, ground_truth: np.ndarray, confidence_inter
 		prb_upper = float('nan')
 
 	return prb, prb_lower, prb_upper
+
+
 
 
 def plot_correlation(corr: pd.DataFrame, title: str = "Correlation of Variables"):

@@ -277,6 +277,46 @@
 		"type": "string",
 		"groups": ["location"]
 	},
+
+	"model_land_value":{
+		"name": "Moedl land value",
+		"description": "Model land value",
+		"type": "number",
+		"groups": ["valuation"]
+	},
+	"model_impr_value":{
+		"name": "Model improvement value",
+		"description": "Model improvement value",
+		"type": "number",
+		"groups": ["valuation"]
+	},
+	"model_market_value":{
+		"name": "Model market value",
+		"description": "Model market value",
+		"type": "number",
+		"groups": ["valuation"]
+	},
+	"model_land_alloc":{
+		"name": "Model land allocation",
+		"description": "Model estimate of what % of the total value of the parcel is due to the land value alone",
+		"type": "percent",
+		"groups": ["valuation"]
+	},
+	"model_market_value_land_sqft":{
+		"name": "Model market value per land square foot",
+		"description": "Model market value, divided by the size of the parcel",
+		"type": "number",
+		"groups": ["valuation"]
+	},
+	"model_land_value_land_sqft":{
+		"name": "Model land value per land square foot",
+		"description": "Model land value, divided by the size of the parcel",
+		"type": "number",
+		"groups": ["valuation"]
+	},
+	"model_market_value_impr_sqft":{},
+	"model_impr_value_impr_sqft":{},
+
 	"assr_land_value":{
 		"name": "{jurisdiction} land value",
 		"description": "{jurisdiction} land value",

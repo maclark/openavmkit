@@ -52,6 +52,17 @@ class SalesUniversePair:
     """
 		return getattr(self, key)
 
+
+	def copy(self):
+		"""
+		Create a copy of the SalesUniversePair object.
+
+		:returns: A new SalesUniversePair object with copied DataFrames.
+		:rtype: SalesUniversePair
+		"""
+		return SalesUniversePair(self.sales.copy(), self.universe.copy())
+
+
 	def set(self, key, value):
 		"""
     Set the sales or universe DataFrame.

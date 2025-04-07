@@ -8,11 +8,13 @@ import numpy as np
 import pandas as pd
 
 from openavmkit.benchmark import run_one_model, MultiModelResults, _calc_benchmark, get_data_split_for, \
-  run_one_hedonic_model
+  run_one_hedonic_model, _optimize_ensemble, _run_ensemble, run_ensemble, _format_benchmark_df
 from openavmkit.data import SalesUniversePair, enrich_time, _perform_canonical_split, get_important_field, \
-  _basic_geo_enrichment, _enrich_sup_spatial_lag
+  _basic_geo_enrichment, _enrich_sup_spatial_lag, get_hydrated_sales_from_sup
 from openavmkit.horizontal_equity_study import mark_horizontal_equity_clusters
+from openavmkit.modeling import SingleModelResults, LandPredictionResults
 from openavmkit.synthetic.synthetic import make_geo_blocks
+from openavmkit.utilities.data import div_field_z_safe
 from openavmkit.utilities.geometry import get_crs_from_lat_lon
 
 
@@ -22,6 +24,8 @@ def trial_simple_plane(params: dict):
 
   # Generate the plane
   gdf = simple_plane(params)
+  gdf = _basic_geo_enrichment(gdf, {})
+  gdf = add_polar_neighborhoods(gdf, [(2, 1), (4, 1), (8, 1), (16, 1), (32, 1)])
 
   # Add land values
   land_curve = params["land_value_curve"]
@@ -38,7 +42,6 @@ def trial_simple_plane(params: dict):
 
   gdf["true_land_value"] = add_simple_land_value(gdf, {"curve": land_curve, "base_value": base_value, "size_field": size_field})
   gdf["true_market_value"] = gdf["true_land_value"]
-  gdf = _basic_geo_enrichment(gdf, {})
 
   df_univ = gdf.copy()
 
@@ -55,7 +58,7 @@ def trial_simple_plane(params: dict):
   he_settings = {
     "analysis": {
       "horizontal_equity": {
-        "location": "loc_8",
+        "location": "loc_polar_16",
         "fields_numeric": ["dist_to_centroid"]
       }
     }
@@ -71,12 +74,23 @@ def trial_simple_plane(params: dict):
   return sup
 
 
+def add_polar_neighborhoods(gdf: gpd.GeoDataFrame, divisions: list[tuple]) -> gpd.GeoDataFrame:
+  max = gdf["polar_radius"].max()
+
+  for loc_slice_x, loc_slice_y in divisions:
+    gdf[f"loc_polar_{loc_slice_x}"] = ((gdf["polar_radius"] // (max / loc_slice_x)).astype(int).astype(str) + "x" +
+                                       (gdf["polar_angle"] // (360 / loc_slice_y)).astype(int).astype(str))
+  return gdf
+
+
 def trial_simple_plane_w_buildings(params: dict):
 
   random.seed(params.get("seed", 1337))
 
   # Generate the plane
   gdf = simple_plane_w_buildings(params)
+  gdf = _basic_geo_enrichment(gdf, {})
+  gdf = add_polar_neighborhoods(gdf, [(2, 1), (4, 1), (8, 1), (16, 1), (32, 1)])
 
   # Add land values
   land_curve = params["land_value_curve"]
@@ -92,7 +106,6 @@ def trial_simple_plane_w_buildings(params: dict):
   gdf["true_impr_value"] = add_simple_bldg_value(gdf, {"base_value": params["bldg_value_base"], "size_field": f"bldg_area_finished_sq{units}"})
 
   gdf["true_market_value"] = gdf["true_land_value"] + gdf["true_impr_value"]
-  gdf = _basic_geo_enrichment(gdf, {})
 
   df_univ = gdf.copy()
 
@@ -109,12 +122,24 @@ def trial_simple_plane_w_buildings(params: dict):
   he_settings = {
     "analysis": {
       "horizontal_equity": {
-        "location": "loc_8",
+        "location": "loc_polar_16",
         "fields_numeric": ["dist_to_centroid", f"bldg_area_finished_sq{units}"],
+      },
+      "land_equity": {
+        "location": "loc_polar_16",
+        "fields_numeric": ["dist_to_centroid", "polar_angle"]
+      },
+      "impr_equity": {
+        "fields_numeric": [f"bldg_area_finished_sq{units}"]
       }
     }
   }
+
   df_univ = mark_horizontal_equity_clusters(df_univ, he_settings, verbose=False)
+
+  df_univ = mark_horizontal_equity_clusters(df_univ, he_settings, verbose=False, settings_object="land_equity", id_name="land_he_id")
+
+  df_univ = mark_horizontal_equity_clusters(df_univ, he_settings, verbose=False, settings_object="impr_equity", id_name="impr_he_id")
 
   # Package as SUP
   sup = SalesUniversePair(df_sales, df_univ)
@@ -186,6 +211,179 @@ def run_trials(sup_generator: callable, params: dict, variations: dict):
     write_trial_results(trial_hedonic_results, sups, hedonic_outpath, "hedonic", verbose=verbose)
   if len(trial_vacant_results) > 0:
     write_trial_results(trial_vacant_results, sups, vacant_outpath, "vacant", verbose=verbose)
+
+  for id in trial_results:
+    main_results = trial_results.get(id, None)
+    vacant_results = trial_vacant_results.get(id, None)
+    hedonic_results = trial_hedonic_results.get(id, None)
+
+    if vacant_results is not None or hedonic_results is not None:
+      sup = sups[id]
+      evaluate_trial_land_results(
+        id,
+        sup,
+        "test",
+        {},
+        main_results,
+        vacant_results,
+        hedonic_results,
+        params["outpath"],
+        params["dep_var_test"],
+        verbose
+      )
+
+
+def evaluate_trial_one_land_result(
+    model_id: str,
+    sup: SalesUniversePair,
+    total_results: SingleModelResults,
+    land_results: SingleModelResults,
+    dep_var_test: str,
+    verbose: bool = False
+):
+  sup = sup.copy()
+
+  pred_test = total_results.pred_test.y_pred
+  pred_sales = total_results.pred_sales.y_pred
+  pred_univ = total_results.pred_univ
+
+
+  land_pred_test = land_results.pred_test.y_pred
+  land_pred_sales = land_results.pred_sales.y_pred
+  land_pred_univ = land_results.pred_univ
+
+
+  df_univ = sup.universe
+  df_univ["model_market_value"] = total_results.pred_univ
+  df_univ["model_land_value"] = land_results.pred_univ
+  df_univ["model_impr_value"] = df_univ["model_market_value"] - df_univ["model_land_value"]
+
+  df_sales = sup.sales
+
+  sup.set("universe", df_univ)
+
+  scores = LandPredictionResults(
+    "model_land_value",
+    "model_impr_value",
+    "model_market_value",
+    dep_var_test,
+    sup
+  )
+
+  return {
+    "model": model_id,
+    "count": len(df_univ),
+    "sales": len(df_sales[df_sales["valid_sale"].eq(True)]),
+    "land_sales": len(df_sales[df_sales["valid_for_land_ratio_study"].eq(True)]),
+    "med_ratio": scores.land_ratio_study.median_ratio,
+    "cod": scores.land_ratio_study.cod,
+    "cod_trim": scores.land_ratio_study.cod_trim,
+    "total_chd": scores.total_chd,
+    "impr_chd": scores.impr_chd,
+    "land_chd": scores.land_chd,
+    "null": scores.perc_land_null,
+    "neg": scores.perc_land_negative,
+    "bad_sum": scores.perc_dont_add_up,
+    "over": scores.perc_land_overshoot,
+    "impr_over_100": scores.perc_improved_land_over_100,
+    "vac_not_100": scores.perc_vacant_land_not_100,
+    "vac_impr_not_0": scores.perc_vacant_land_impr_not_0
+  }
+
+
+def evaluate_trial_land_results(
+    trial_id: str,
+    sup: SalesUniversePair,
+    model_group: str,
+    settings: dict,
+    main: MultiModelResults,
+    vacant: MultiModelResults | None,
+    hedonic: MultiModelResults | None,
+    outpath: str,
+    dep_var_test: str,
+    verbose: bool = False
+):
+  main_outpath = f"{outpath}/main/{trial_id}"
+  hedonic_outpath = f"{outpath}/hedonic/{trial_id}"
+  vacant_outpath = f"{outpath}/vacant/{trial_id}"
+
+  vacant_ensemble_list : dict[str] | None = None
+  hedonic_ensemble_list : dict[str] | None = None
+  vacant_ensemble : SingleModelResults | None = None
+  hedonic_ensemble : SingleModelResults | None = None
+
+  main_ensemble, main_ensemble_list = run_ensemble(
+    sup.sales,
+    sup.universe,
+    model_group=model_group,
+    vacant_only=False,
+    dep_var=dep_var_test,
+    dep_var_test=dep_var_test,
+    outpath=main_outpath,
+    all_results=main,
+    settings=settings,
+    verbose=verbose,
+    hedonic=False,
+    df_multiverse=None
+  )
+
+
+  rows = []
+
+  if vacant is not None:
+    for key in vacant.model_results:
+      land_smr = vacant.model_results[key]
+      main_smr = main_ensemble
+      if land_smr.pred_univ is None or main_smr.pred_univ is None:
+        continue
+
+      non_null_land_univ_count = len(land_smr.pred_univ[~pd.isna(land_smr.pred_univ)])
+      non_null_main_univ_count = len(main_smr.pred_univ[~pd.isna(main_smr.pred_univ)])
+      if non_null_land_univ_count == 0 or non_null_main_univ_count == 0:
+        continue
+
+      data = evaluate_trial_one_land_result(
+        f"{key}_v",
+        sup,
+        main_smr,
+        land_smr,
+        dep_var_test,
+        verbose
+      )
+      rows.append(data)
+  if hedonic is not None:
+    for key in hedonic.model_results:
+      land_smr = hedonic.model_results[key]
+      main_smr = main.model_results[key]
+      if land_smr.pred_univ is None or main_smr.pred_univ is None:
+        continue
+
+      non_null_land_univ_count = len(land_smr.pred_univ[~pd.isna(land_smr.pred_univ)])
+      non_null_main_univ_count = len(main_smr.pred_univ[~pd.isna(main_smr.pred_univ)])
+
+      if non_null_land_univ_count == 0 or non_null_main_univ_count == 0:
+        continue
+
+      data = evaluate_trial_one_land_result(
+        f"{key}_h",
+        sup,
+        main_smr,
+        land_smr,
+        dep_var_test,
+        verbose
+      )
+      rows.append(data)
+
+  if len(rows) > 0:
+    df_results = pd.DataFrame(rows)
+    df_results.to_csv(f"{main_outpath}/land_results.csv", index=False)
+    print("")
+    print("************************")
+    print(f"LAND RESULTS FOR: {trial_id}")
+    print("************************")
+
+    #transpose & print
+    print(_format_benchmark_df(df_results.transpose()))
 
 
 def write_trial_results(
