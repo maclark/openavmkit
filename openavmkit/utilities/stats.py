@@ -251,7 +251,7 @@ def calc_prb(predictions: np.ndarray, ground_truth: np.ndarray, confidence_inter
 		raise ValueError("predictions and ground_truth must have the same length")
 
 	if predictions.size == 0 or ground_truth.size == 0:
-		return float('nan')
+		return float('nan'), float('nan'), float('nan')
 
 	# TODO: this block is necessary because predictions is not guaranteed to have non-zero values
 	predictions = predictions.copy()
@@ -710,6 +710,25 @@ def calc_mse(prediction: np.ndarray, ground_truth: np.ndarray):
   :rtype: float
   """
 	return np.mean((prediction - ground_truth) ** 2)
+
+
+def calc_mse_r2_adj_r2(predictions: np.ndarray, ground_truth: np.ndarray, num_vars: int):
+	#mse = calc_mse(predictions, ground_truth)
+
+	mse = np.mean((ground_truth - predictions) ** 2)
+	ss_res = np.sum((ground_truth - predictions) ** 2)
+	ss_tot = np.sum((ground_truth - np.mean(ground_truth)) ** 2)
+
+	r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else float('inf')
+
+	n = len(predictions)
+	k = num_vars
+	divisor = n - k - 1
+	if divisor == 0:
+		adj_r2 = float('inf')
+	else:
+		adj_r2 = 1 - ((1 - r2) * (n - 1) / divisor)
+	return mse, r2, adj_r2
 
 
 def calc_cross_validation_score(X, y):

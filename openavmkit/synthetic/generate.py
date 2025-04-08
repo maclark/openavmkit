@@ -10,12 +10,13 @@ import pandas as pd
 from openavmkit.benchmark import run_one_model, MultiModelResults, _calc_benchmark, get_data_split_for, \
   run_one_hedonic_model, _optimize_ensemble, _run_ensemble, run_ensemble, _format_benchmark_df
 from openavmkit.data import SalesUniversePair, enrich_time, _perform_canonical_split, get_important_field, \
-  _basic_geo_enrichment, _enrich_sup_spatial_lag, get_hydrated_sales_from_sup
+  _basic_geo_enrichment, _enrich_sup_spatial_lag, get_hydrated_sales_from_sup, get_sale_field
 from openavmkit.horizontal_equity_study import mark_horizontal_equity_clusters
 from openavmkit.modeling import SingleModelResults, LandPredictionResults
 from openavmkit.synthetic.synthetic import make_geo_blocks
 from openavmkit.utilities.data import div_field_z_safe
 from openavmkit.utilities.geometry import get_crs_from_lat_lon
+from openavmkit.utilities.stats import calc_mse_r2_adj_r2
 
 
 def trial_simple_plane(params: dict):
@@ -218,7 +219,9 @@ def run_trials(sup_generator: callable, params: dict, variations: dict):
     hedonic_results = trial_hedonic_results.get(id, None)
 
     if vacant_results is not None or hedonic_results is not None:
+
       sup = sups[id]
+      sale_field = get_sale_field({}, sup.sales)
       evaluate_trial_land_results(
         id,
         sup,
@@ -228,7 +231,9 @@ def run_trials(sup_generator: callable, params: dict, variations: dict):
         vacant_results,
         hedonic_results,
         params["outpath"],
-        params["dep_var_test_hedonic"],
+        sale_field,
+        "true_market_value",
+        "true_land_value",
         verbose
       )
 
@@ -238,7 +243,8 @@ def evaluate_trial_one_land_result(
     sup: SalesUniversePair,
     total_results: SingleModelResults,
     land_results: SingleModelResults,
-    dep_var_test: str,
+    sale_field: str,
+    ground_truth_land_field: str,
     verbose: bool = False
 ):
   sup = sup.copy()
@@ -256,22 +262,46 @@ def evaluate_trial_one_land_result(
     "model_land_value",
     "model_impr_value",
     "model_market_value",
-    dep_var_test,
+    sale_field,
+    land_results.ind_vars,
+    sup
+  )
+
+  scores_truth = LandPredictionResults(
+    "model_land_value",
+    "model_impr_value",
+    "model_market_value",
+    ground_truth_land_field,
+    land_results.ind_vars,
     sup
   )
 
   return {
     "model": model_id,
-    "utility_score": scores.utility_score,
+    " ": "",
     "count": len(df_univ),
     "sales": len(df_sales[df_sales["valid_sale"].eq(True)]),
     "land_sales": len(df_sales[df_sales["valid_for_land_ratio_study"].eq(True)]),
+    "utility_score": scores.utility_score,
+    "  ": "",
+    "true_r2": scores_truth.r2,
+    "true_adj_r2": scores_truth.adj_r2,
+    "true_prb": scores_truth.prb,
+    "r2": scores.r2,
+    "adj_r2": scores.adj_r2,
+    "prb": scores.prb,
+    "   ": "",
+    "true_med_ratio": scores_truth.land_ratio_study.median_ratio,
+    "true_cod": scores_truth.land_ratio_study.cod,
+    "true_cod_trim": scores_truth.land_ratio_study.cod_trim,
     "med_ratio": scores.land_ratio_study.median_ratio,
     "cod": scores.land_ratio_study.cod,
     "cod_trim": scores.land_ratio_study.cod_trim,
+    "    ": "",
     "chd_total": scores.total_chd,
     "chd_impr": scores.impr_chd,
     "chd_land": scores.land_chd,
+    "     ":"",
     "null": scores.perc_land_null,
     "neg": scores.perc_land_negative,
     "bad_sum": scores.perc_dont_add_up,
@@ -289,7 +319,9 @@ def evaluate_trial_land_results(
     vacant: MultiModelResults | None,
     hedonic: MultiModelResults | None,
     outpath: str,
-    dep_var_test: str,
+    sale_field: str,
+    ground_truth_field: str,
+    ground_truth_land_field: str,
     verbose: bool = False
 ):
   main_outpath = f"{outpath}/main/{trial_id}"
@@ -306,8 +338,8 @@ def evaluate_trial_land_results(
     sup.universe,
     model_group=model_group,
     vacant_only=False,
-    dep_var=dep_var_test,
-    dep_var_test=dep_var_test,
+    dep_var=ground_truth_field,
+    dep_var_test=ground_truth_field,
     outpath=main_outpath,
     all_results=main,
     settings=settings,
@@ -315,7 +347,6 @@ def evaluate_trial_land_results(
     hedonic=False,
     df_multiverse=None
   )
-
 
   rows_h = []
   rows_v = []
@@ -327,7 +358,7 @@ def evaluate_trial_land_results(
         main_smr = main.model_results[key]
       else:
         main_smr = main_ensemble
-        print("Couldn't find '{key}' in main model results, using ensemble instead")
+        raise ValueError(f"Couldn't find '{key}' in main model results, using ensemble instead")
       if land_smr.pred_univ is None or main_smr.pred_univ is None:
         continue
 
@@ -341,10 +372,12 @@ def evaluate_trial_land_results(
         sup,
         main_smr,
         land_smr,
-        dep_var_test,
+        sale_field,
+        ground_truth_land_field,
         verbose
       )
       rows_v.append(data)
+
   if hedonic is not None:
     for key in hedonic.model_results:
       land_smr = hedonic.model_results[key]
@@ -363,7 +396,8 @@ def evaluate_trial_land_results(
         sup,
         main_smr,
         land_smr,
-        dep_var_test,
+        sale_field,
+        ground_truth_land_field,
         verbose
       )
       rows_h.append(data)
@@ -387,8 +421,6 @@ def evaluate_trial_land_results(
   if len(df_results) > 0:
     df_results.sort_values(by="utility_score", ascending=True, inplace=True)
     df_results.to_csv(f"{main_outpath}/land_results.csv", index=False)
-
-
 
 
 def write_trial_results(

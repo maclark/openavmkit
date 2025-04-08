@@ -2,6 +2,14 @@ import numpy as np
 import pandas as pd
 
 
+def dig2_fancy_format(num):
+
+  if abs(num) < 100:
+    return '{:.2f}'.format(num)
+  else:
+    return fancy_format(num)
+
+
 def fancy_format(num):
   if not isinstance(num, (int, float, np.number)):
     # if NoneType:
@@ -21,9 +29,7 @@ def fancy_format(num):
     return "N/A"
   if num == 0:
     return '0.00'
-  if 1 > num > 0:
-    return '{:.2f}'.format(num)
-  if -1 < num < 0:
+  if 1 > abs(num) > 0:
     return '{:.2f}'.format(num)
   num = float('{:.3g}'.format(num))
   magnitude = 0

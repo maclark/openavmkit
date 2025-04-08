@@ -19,7 +19,7 @@ from openavmkit.modeling import run_mra, run_gwr, run_xgboost, run_lightgbm, run
 from openavmkit.reports import MarkdownReport, _markdown_to_pdf
 from openavmkit.time_adjustment import enrich_time_adjustment
 from openavmkit.utilities.data import div_z_safe, dataframe_to_markdown
-from openavmkit.utilities.format import fancy_format
+from openavmkit.utilities.format import fancy_format, dig2_fancy_format
 from openavmkit.utilities.modeling import NaiveSqftModel, LocalSqftModel, PassThroughModel, GWRModel, MRAModel, \
 	LarsModel, GroundTruthModel, SpatialLagModel
 from openavmkit.utilities.settings import get_fields_categorical, get_variable_interactions, get_valuation_date, \
@@ -527,13 +527,24 @@ def _format_benchmark_df(df: pd.DataFrame, transpose: bool = True):
 		"count_univ": "{:,.0f}",
 		"mse": fancy_format,
 		"rmse": fancy_format,
-		"r2": "{:.2f}",
-		"adj_r2": "{:.2f}",
-		"median_ratio": "{:.2f}",
-		"cod": "{:.2f}",
-		"cod_trim": "{:.2f}",
-		"prd": "{:.2f}",
-		"prb": "{:.2f}",
+
+		"r2": dig2_fancy_format,
+		"adj_r2": dig2_fancy_format,
+		"median_ratio": dig2_fancy_format,
+		"cod": dig2_fancy_format,
+		"cod_trim": dig2_fancy_format,
+
+		"true_mse": fancy_format,
+		"true_rmse": fancy_format,
+		"true_r2": dig2_fancy_format,
+		"true_adj_r2": dig2_fancy_format,
+		"true_median_ratio": dig2_fancy_format,
+		"true_cod": dig2_fancy_format,
+		"true_cod_trim": dig2_fancy_format,
+		"true_prb": dig2_fancy_format,
+
+		"prd": dig2_fancy_format,
+		"prb": dig2_fancy_format,
 		"total": fancy_format,
 		"param": fancy_format,
 		"train": fancy_format,
@@ -541,7 +552,8 @@ def _format_benchmark_df(df: pd.DataFrame, transpose: bool = True):
 		"univ": fancy_format,
 		"multi": fancy_format,
 		"chd": fancy_format,
-		"med_ratio": "{:.2f}",
+		"med_ratio": dig2_fancy_format,
+		"true_med_ratio": dig2_fancy_format,
 		"chd_total": fancy_format,
 		"chd_impr": fancy_format,
 		"chd_land": fancy_format,
@@ -553,6 +565,8 @@ def _format_benchmark_df(df: pd.DataFrame, transpose: bool = True):
 	}
 
 	for col in df.columns:
+		if col.strip() == "":
+			continue
 		if col in formats:
 			if callable(formats[col]):
 				df[col] = df[col].apply(formats[col])

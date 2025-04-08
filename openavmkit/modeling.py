@@ -37,7 +37,7 @@ from openavmkit.utilities.modeling import GarbageModel, AverageModel, NaiveSqftM
   GWRModel, MRAModel, LarsModel, GroundTruthModel, SpatialLagModel
 from openavmkit.utilities.data import clean_column_names, div_field_z_safe
 from openavmkit.utilities.settings import get_valuation_date
-from openavmkit.utilities.stats import quick_median_chd_pl
+from openavmkit.utilities.stats import quick_median_chd_pl, calc_mse_r2_adj_r2, calc_prb
 from openavmkit.tuning import tune_lightgbm, tune_xgboost, tune_catboost
 from openavmkit.utilities.timing import TimingData
 
@@ -72,6 +72,7 @@ class LandPredictionResults:
       impr_prediction_field: str,
       total_prediction_field: str,
       dep_var: str,
+      ind_vars: list[str],
       sup: SalesUniversePair
   ):
 
@@ -88,9 +89,11 @@ class LandPredictionResults:
       "bldg_area_finished_sqft"
     ]
 
+    use_sales_not_univ = False
     for field in necessary_fields:
       if field not in sup.universe:
-        raise ValueError(f"Necessary field '{field}' not found in universe DataFrame.")
+        if "sale" not in field:
+          raise ValueError(f"Necessary field '{field}' not found in universe DataFrame.")
 
     df = get_hydrated_sales_from_sup(sup)
 
@@ -108,11 +111,24 @@ class LandPredictionResults:
     df_univ["impr_allocation"] = div_field_z_safe(df_univ[impr_prediction_field], df_univ[total_prediction_field])
 
     # Phase 1: Accuracy
-    df = df[df["valid_for_ratio_study"].eq(True)].copy()
-    land_predictions = df[land_prediction_field]
-    sale_prices = df[dep_var]
+    if "sale" in dep_var:
+      df = df[df["valid_for_land_ratio_study"].eq(True)].copy()
+      land_predictions = df[land_prediction_field]
+      sale_prices = df[dep_var]
+    elif dep_var == "true_land_value":
+      df = df_univ.copy()
+      land_predictions = df[land_prediction_field]
+      sale_prices = df[dep_var]
+    else:
+      raise ValueError(f"Unsupported dep_var '{dep_var}' for land prediction results.")
 
     self.land_ratio_study = RatioStudy(land_predictions, sale_prices)
+    mse, r2, adj_r2 = calc_mse_r2_adj_r2(land_predictions, sale_prices, len(ind_vars))
+    self.mse = mse
+    self.rmse = np.sqrt(mse)
+    self.r2 = r2
+    self.adj_r2 = adj_r2
+    self.prb, _, _ = calc_prb(land_predictions, sale_prices)
 
     df_univ_valid = df_univ.drop(columns="geometry", errors="ignore").copy()
 

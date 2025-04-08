@@ -230,12 +230,14 @@ def simulate_removed_buildings(df: pd.DataFrame, settings: dict, idx_vacant: Ser
 	return df
 
 
-def get_sale_field(settings: dict) -> str:
+def get_sale_field(settings: dict, df:pd.DataFrame=None) -> str:
 	"""
   Determine the appropriate sale price field ("sale_price" or "sale_price_time_adj") based on time adjustment settings.
 
   :param settings: Settings dictionary.
   :type settings: dict
+  :param df: Optional DataFrame to check field existence.
+  :type df: pandas.DataFrame, optional
   :returns: Field name to be used for sale price.
   :rtype: str
   """
@@ -243,6 +245,9 @@ def get_sale_field(settings: dict) -> str:
 	use = ta.get("use", True)
 	if use:
 		return "sale_price_time_adj"
+	if df is not None:
+		if "sale_price_time_adj" in df:
+			return "sale_price_time_adj"
 	return "sale_price"
 
 
