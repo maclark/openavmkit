@@ -228,7 +228,7 @@ def run_trials(sup_generator: callable, params: dict, variations: dict):
         vacant_results,
         hedonic_results,
         params["outpath"],
-        params["dep_var_test"],
+        params["dep_var_test_hedonic"],
         verbose
       )
 
@@ -262,21 +262,21 @@ def evaluate_trial_one_land_result(
 
   return {
     "model": model_id,
+    "utility_score": scores.utility_score,
     "count": len(df_univ),
     "sales": len(df_sales[df_sales["valid_sale"].eq(True)]),
-    "land\nsales": len(df_sales[df_sales["valid_for_land_ratio_study"].eq(True)]),
-    "med\nratio": scores.land_ratio_study.median_ratio,
+    "land_sales": len(df_sales[df_sales["valid_for_land_ratio_study"].eq(True)]),
+    "med_ratio": scores.land_ratio_study.median_ratio,
     "cod": scores.land_ratio_study.cod,
-    "cod\ntrim": scores.land_ratio_study.cod_trim,
-    "chd\ntotal": scores.total_chd,
-    "chd\nimpr": scores.impr_chd,
-    "chd\nland": scores.land_chd,
+    "cod_trim": scores.land_ratio_study.cod_trim,
+    "chd_total": scores.total_chd,
+    "chd_impr": scores.impr_chd,
+    "chd_land": scores.land_chd,
     "null": scores.perc_land_null,
     "neg": scores.perc_land_negative,
-    "bad\nsum": scores.perc_dont_add_up,
-    "land\nover": scores.perc_land_overshoot,
-    "impr\n> 100": scores.perc_improved_land_over_100,
-    "vac not\n100": scores.perc_vacant_land_not_100
+    "bad_sum": scores.perc_dont_add_up,
+    "land_over": scores.perc_land_overshoot,
+    "vac_not_100": scores.perc_vacant_land_not_100
   }
 
 
@@ -317,12 +317,17 @@ def evaluate_trial_land_results(
   )
 
 
-  rows = []
+  rows_h = []
+  rows_v = []
 
   if vacant is not None:
     for key in vacant.model_results:
       land_smr = vacant.model_results[key]
-      main_smr = main_ensemble
+      if key in main.model_results:
+        main_smr = main.model_results[key]
+      else:
+        main_smr = main_ensemble
+        print("Couldn't find '{key}' in main model results, using ensemble instead")
       if land_smr.pred_univ is None or main_smr.pred_univ is None:
         continue
 
@@ -332,14 +337,14 @@ def evaluate_trial_land_results(
         continue
 
       data = evaluate_trial_one_land_result(
-        f"{key}_v",
+        key,
         sup,
         main_smr,
         land_smr,
         dep_var_test,
         verbose
       )
-      rows.append(data)
+      rows_v.append(data)
   if hedonic is not None:
     for key in hedonic.model_results:
       land_smr = hedonic.model_results[key]
@@ -354,33 +359,36 @@ def evaluate_trial_land_results(
         continue
 
       data = evaluate_trial_one_land_result(
-        f"{key}_h",
+        key,
         sup,
         main_smr,
         land_smr,
         dep_var_test,
         verbose
       )
-      rows.append(data)
+      rows_h.append(data)
 
-  if len(rows) > 0:
-    df_results = pd.DataFrame(rows)
+  for rows, m_type in [(rows_h, "hedonic"), (rows_v, "vacant")]:
+    if len(rows) > 0:
+      df_results = pd.DataFrame(rows)
+      df_results.sort_values(by="utility_score", ascending=True, inplace=True)
+
+      print("")
+      print("************************")
+      print(f"LAND RESULTS FOR: {trial_id}, {m_type}")
+      print("************************")
+
+      # set "model" as index:
+      df_results = df_results.set_index("model")
+      print(_format_benchmark_df(df_results))
+
+  all_rows = rows_h + rows_v
+  df_results = pd.DataFrame(all_rows)
+  if len(df_results) > 0:
+    df_results.sort_values(by="utility_score", ascending=True, inplace=True)
     df_results.to_csv(f"{main_outpath}/land_results.csv", index=False)
-    print("")
-    print("************************")
-    print(f"LAND RESULTS FOR: {trial_id}")
-    print("************************")
 
-    fields = ["null", "neg", "bad\nsum", "over", "impr\n> 100", "vac not\n100"]
-    df_results_1 = df_results.drop(columns=fields)
-    df_results_2 = df_results[["model"]+fields]
 
-    # set "model" as index:
-    df_results_1 = df_results_1.set_index("model")
-    print(_format_benchmark_df(df_results_1, transpose=False))
-    print("")
-    df_results_2 = df_results_2.set_index("model")
-    print(_format_benchmark_df(df_results_2, transpose=False))
 
 
 def write_trial_results(
@@ -519,7 +527,7 @@ def run_one_trial(sup: SalesUniversePair, params: dict):
       save_params=True,
       use_saved_params=True,
       save_results=False,
-      use_saved_results=False,
+      use_saved_results=params.get("use_saved_results", False),
       verbose=verbose,
       hedonic=False,
       test_keys=test_keys,

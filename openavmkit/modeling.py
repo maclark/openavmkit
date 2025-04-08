@@ -175,6 +175,9 @@ class LandPredictionResults:
     ])
     self.perc_improved_land_over_100 = count_improved_land_over_100 / count
 
+    self.utility_score = 0
+    self.utility_score = land_utility_score(self)
+
     # Paired sales analysis tests:
     # Control for location:
     # - Land allocation inversely correlated with floor area ratio
@@ -926,6 +929,73 @@ class SingleModelResults:
     str += f"---->CHD    : {self.chd:8.4f}\n"
     str += f"\n"
     return str
+
+
+def land_utility_score(land_results: LandPredictionResults):
+  # Utility score is a composite score based on the following:
+  # 1. Accuracy:
+  #   - Land ratio study median ratio
+  #   - Land ratio study untrimmed COD
+  # 2. Consistency:
+  #   - Land CHD
+  #   - Impr CHD
+  # 3. Sanity:
+  #   - All the various sanity checks
+
+  # Normalization values
+  cod_base = 15
+  chd_land_base = 15
+  chd_impr_base = 30 # we're more tolerant of higher CHD values for improvement than for land
+  dist_ratio_base = 0.01
+
+  # Weights
+  weight_dist_ratio = 10.0
+  weight_chd_land = 10.0
+  weight_chd_impr = 10.0
+  weight_sanity = 100.0
+
+  weight_cod = 1.0
+  weight_invalid = 2.0
+  weight_overshoot = 10.0
+  weight_undershoot = 1.0
+
+  # penalize over-estimates; err on the side of under-estimates
+  ratio_over_penalty = 2 if land_results.land_ratio_study.median_ratio < 1.05 else 1
+
+  cod = land_results.land_ratio_study.cod
+  dist_ratio = abs(1.0 - cod)
+
+  # Normalize the scores around the base values
+  cod_score = cod / cod_base
+  dist_ratio_score = dist_ratio / dist_ratio_base
+  chd_land_score = land_results.land_chd / chd_land_base
+  chd_impr_score = land_results.impr_chd / chd_impr_base
+
+  # Calculate weighted components
+  weighted_cod_score = cod_score * weight_cod
+  weighted_dist_ratio_score = dist_ratio_score * weight_dist_ratio * ratio_over_penalty
+
+  weighted_chd_land_score = chd_land_score * weight_chd_land
+  weighted_chd_impr_score = chd_impr_score * weight_chd_impr
+  weighted_chd_score = weighted_chd_land_score + weighted_chd_impr_score
+
+  # sanity
+  perc_invalid = ((100 * land_results.perc_land_invalid) +
+                  (100 * land_results.perc_impr_invalid) +
+                  (100 * land_results.perc_dont_add_up))
+  perc_overshoot = (100 * land_results.perc_land_overshoot)
+  perc_undershoot = (100 * land_results.perc_vacant_land_not_100)
+
+  perc_invalid *= weight_invalid
+  perc_overshoot *= weight_overshoot
+  perc_undershoot *= weight_undershoot
+
+  sanity_score = (perc_invalid + perc_overshoot + perc_undershoot)
+  weighted_sanity_score = sanity_score * weight_sanity
+
+  final_score = weighted_dist_ratio_score + weighted_cod_score + weighted_chd_score + weighted_sanity_score
+  return final_score
+
 
 
 def model_utility_score(model_results: SingleModelResults):

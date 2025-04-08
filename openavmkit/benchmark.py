@@ -532,7 +532,6 @@ def _format_benchmark_df(df: pd.DataFrame, transpose: bool = True):
 		"median_ratio": "{:.2f}",
 		"cod": "{:.2f}",
 		"cod_trim": "{:.2f}",
-		"cod\ntrim": "{:.2f}",
 		"prd": "{:.2f}",
 		"prb": "{:.2f}",
 		"total": fancy_format,
@@ -543,16 +542,14 @@ def _format_benchmark_df(df: pd.DataFrame, transpose: bool = True):
 		"multi": fancy_format,
 		"chd": fancy_format,
 		"med_ratio": "{:.2f}",
-		"med\nratio": "{:.2f}",
-		"chd\ntotal": fancy_format,
-		"chd\nimpr": fancy_format,
-		"chd\nland": fancy_format,
+		"chd_total": fancy_format,
+		"chd_impr": fancy_format,
+		"chd_land": fancy_format,
 		"null": "{:.1%}",
 		"neg": "{:.1%}",
-		"bad\nsum": "{:.1%}",
-		"land\nover": "{:.1%}",
-		"impr\n> 100": "{:.1%}",
-		"vac not\n100": "{:.1%}"
+		"bad_sum": "{:.1%}",
+		"land_over": "{:.1%}",
+		"vac_not_100": "{:.1%}"
 	}
 
 	for col in df.columns:
