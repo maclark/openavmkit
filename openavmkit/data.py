@@ -156,13 +156,13 @@ def enrich_time(df: pd.DataFrame, time_formats: dict, settings: dict) -> pd.Data
   enriches the dataframe with additional time fields (e.g., "sale_year", "sale_month", "sale_age_days").
 
   :param df: Input DataFrame.
-  :type df: pd.DataFrame
+  :type df: pandas.DataFrame
   :param time_formats: Dictionary mapping field names to datetime formats.
   :type time_formats: dict
   :param settings: Settings dictionary.
   :type settings: dict
   :returns: DataFrame with enriched time fields.
-  :rtype: pd.DataFrame
+  :rtype: pandas.DataFrame
   """
 	for key in time_formats:
 		time_format = time_formats[key]
@@ -191,7 +191,7 @@ def simulate_removed_buildings(df: pd.DataFrame, settings: dict, idx_vacant: Ser
   False for the rows specified by idx_vacant (or all rows if idx_vacant is None).
 
   :param df: Input DataFrame.
-  :type df: pd.DataFrame
+  :type df: pandas.DataFrame
   :param settings: Settings dictionary.
   :type settings: dict
   :param idx_vacant: Optional Series indicating which rows are vacant.
@@ -608,7 +608,7 @@ def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str, pd
 
 		sup.set(supkey, df)
 
-		sup = _enrich_sup_spatial_lag(sup, settings, verbose=verbose)
+		#sup = _enrich_sup_spatial_lag(sup, settings, verbose=verbose)
 
 	return sup
 
@@ -721,9 +721,12 @@ def _enrich_df_openstreetmap(df: pd.DataFrame | gpd.GeoDataFrame, osm_settings: 
                     settings=osm_settings['water_bodies']
                 )
                 if verbose:
-                    print(f"--> Found {len(water_bodies)} water bodies")
+                    if water_bodies.empty:
+                        print("    No water bodies found")
+                    else:
+                        print(f"--> Found {len(water_bodies)} water bodies")
                 if not water_bodies.empty:
-                    dataframes['water_bodies'] = water_bodies
+                    dataframes['water_bodies'] = osm_service.features['water_bodies']
             except Exception as e:
                 warnings.warn(f"Failed to get water bodies: {str(e)}")
                 
@@ -735,24 +738,16 @@ def _enrich_df_openstreetmap(df: pd.DataFrame | gpd.GeoDataFrame, osm_settings: 
                     bbox=bbox,
                     settings=osm_settings['transportation']
                 )
+                if verbose:
+                    if transportation.empty:
+                        print("    No transportation networks found")
+                    else:
+                        print(f"--> Found {len(transportation)} transportation networks")
                 if not transportation.empty:
-                    dataframes['transportation'] = transportation
+                    dataframes['transportation'] = osm_service.features['transportation']
             except Exception as e:
                 warnings.warn(f"Failed to get transportation networks: {str(e)}")
                 
-        if osm_settings.get('elevation', False):
-            if verbose:
-                print("--> Getting elevation data...")
-            try:
-                elevation_data, lon_lat_ranges = osm_service.get_elevation_data(
-                    bbox=bbox,
-                    resolution=osm_settings.get('elevation_resolution', 30)
-                )
-                elevation_stats = osm_service.calculate_elevation_stats(df, elevation_data, lon_lat_ranges)
-                df = df.join(elevation_stats)
-            except Exception as e:
-                warnings.warn(f"Failed to get elevation data: {str(e)}")
-            
         if osm_settings.get('educational', {}).get('enabled', False):
             if verbose:
                 print("--> Getting educational institutions...")
@@ -761,8 +756,13 @@ def _enrich_df_openstreetmap(df: pd.DataFrame | gpd.GeoDataFrame, osm_settings: 
                     bbox=bbox,
                     settings=osm_settings['educational']
                 )
+                if verbose:
+                    if educational.empty:
+                        print("    No educational institutions found")
+                    else:
+                        print(f"--> Found {len(educational)} educational institutions")
                 if not educational.empty:
-                    dataframes['educational'] = educational
+                    dataframes['educational'] = osm_service.features['educational']
             except Exception as e:
                 warnings.warn(f"Failed to get educational institutions: {str(e)}")
                 
@@ -775,9 +775,12 @@ def _enrich_df_openstreetmap(df: pd.DataFrame | gpd.GeoDataFrame, osm_settings: 
                     settings=osm_settings['parks']
                 )
                 if verbose:
-                    print(f"--> Found {len(parks)} parks")
+                    if parks.empty:
+                        print("    No parks found")
+                    else:
+                        print(f"--> Found {len(parks)} parks")
                 if not parks.empty:
-                    dataframes['parks'] = parks
+                    dataframes['parks'] = osm_service.features['parks']
             except Exception as e:
                 warnings.warn(f"Failed to get parks: {str(e)}")
                 
@@ -789,8 +792,13 @@ def _enrich_df_openstreetmap(df: pd.DataFrame | gpd.GeoDataFrame, osm_settings: 
                     bbox=bbox,
                     settings=osm_settings['golf_courses']
                 )
+                if verbose:
+                    if golf_courses.empty:
+                        print("    No golf courses found")
+                    else:
+                        print(f"--> Found {len(golf_courses)} golf courses")
                 if not golf_courses.empty:
-                    dataframes['golf_courses'] = golf_courses
+                    dataframes['golf_courses'] = osm_service.features['golf_courses']
             except Exception as e:
                 warnings.warn(f"Failed to get golf courses: {str(e)}")
         
@@ -1584,86 +1592,187 @@ def _do_perform_spatial_inference(df_in: pd.DataFrame,  s_infer_entry: dict, fie
 	return df
 
 
-def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDataFrame, _id: str, unit: str = "km") -> pd.DataFrame:
-	"""
-  Perform a divide-by-zero-safe nearest neighbor spatial join to calculate distances.
+def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDataFrame, _id: str, max_distance: float = None, unit: str = "km") -> pd.DataFrame:
+    """
+    Perform a divide-by-zero-safe nearest neighbor spatial join to calculate distances.
 
-  :param df_in: Base GeoDataFrame.
-  :type df_in: geopandas.GeoDataFrame
-  :param gdf_in: Overlay GeoDataFrame.
-  :type gdf_in: geopandas.GeoDataFrame
-  :param _id: Identifier used for naming the distance column.
-  :type _id: str
-  :param unit: Unit for distance conversion (default "km").
-  :type unit: str, optional
-  :returns: DataFrame with an added distance column.
-  :rtype: pandas.DataFrame
-  :raises ValueError: If an unsupported unit is specified.
-  """
-	unit_factors = {"m": 1, "km": 0.001, "mile": 0.000621371, "ft": 3.28084}
-	if unit not in unit_factors:
-		raise ValueError(f"Unsupported unit '{unit}'")
-	crs = get_crs(df_in, "equal_distance")
-	df_projected = df_in.to_crs(crs).copy()
-	gdf_projected = gdf_in.to_crs(crs).copy()
-	nearest = gpd.sjoin_nearest(df_projected, gdf_projected, how="left", distance_col=f"dist_to_{_id}")[["key", f"dist_to_{_id}"]]
-	nearest[f"dist_to_{_id}"] *= unit_factors[unit]
-	n_duplicates_nearest = nearest.duplicated(subset="key").sum()
-	n_duplicates_df = df_in.duplicated(subset="key").sum()
-	if n_duplicates_df > 0:
-		raise ValueError(f"Found {n_duplicates_nearest} duplicate keys in the base dataframe, cannot perform distance calculations. Please de-duplicate your dataframes and try again.")
-	if n_duplicates_nearest > 0:
-		nearest = nearest.sort_values(by=["key", f"dist_to_{_id}"], ascending=[True, True])
-		nearest = nearest.drop_duplicates(subset="key")
-	df_out = df_in.merge(nearest, on="key", how="left")
-	return df_out
+    :param df_in: Base GeoDataFrame.
+    :type df_in: geopandas.GeoDataFrame
+    :param gdf_in: Overlay GeoDataFrame.
+    :type gdf_in: geopandas.GeoDataFrame
+    :param _id: Identifier used for naming the distance column.
+    :type _id: str
+    :param max_distance: Maximum distance to consider (in specified unit)
+    :type max_distance: float, optional
+    :param unit: Unit for distance conversion (default "km").
+    :type unit: str, optional
+    :returns: DataFrame with added distance and within_distance columns.
+    :rtype: pandas.DataFrame
+    :raises ValueError: If an unsupported unit is specified.
+    """
+    unit_factors = {"m": 1, "km": 0.001, "mile": 0.000621371, "ft": 3.28084}
+    if unit not in unit_factors:
+        raise ValueError(f"Unsupported unit '{unit}'")
+        
+    crs = get_crs(df_in, "equal_distance")
+    df_projected = df_in.to_crs(crs).copy()
+    gdf_projected = gdf_in.to_crs(crs).copy()
+    
+    # Initialize dictionary to store new columns
+    new_columns = {
+        f"within_{_id}": pd.Series(False, index=df_projected.index),
+        f"dist_to_{_id}": pd.Series(np.nan, index=df_projected.index)
+    }
+    
+    if max_distance is not None:
+        # Create buffer around features we're measuring distance to
+        gdf_buffer = gdf_projected.copy()
+        gdf_buffer.geometry = gdf_buffer.geometry.buffer(max_distance / unit_factors[unit])
+        
+        # Find parcels that intersect with the buffer
+        parcels_within = gpd.sjoin(
+            df_projected, 
+            gdf_buffer, 
+            how="inner", 
+            predicate="intersects"
+        )
+        
+        # Only calculate distances for parcels within buffer
+        if len(parcels_within) > 0:
+            nearest = gpd.sjoin_nearest(
+                parcels_within,
+                gdf_projected,
+                how="left",
+                distance_col=f"dist_to_{_id}"
+            )[["key", f"dist_to_{_id}"]]
+            
+            nearest[f"dist_to_{_id}"] *= unit_factors[unit]
+            
+            # Mark these parcels as within distance
+            new_columns[f"within_{_id}"] = pd.Series(False, index=df_projected.index)
+            new_columns[f"within_{_id}"].loc[df_projected["key"].isin(parcels_within["key"])] = True
+            
+            # Handle duplicates in nearest
+            if nearest.duplicated(subset="key").sum() > 0:
+                nearest = nearest.sort_values(by=["key", f"dist_to_{_id}"], ascending=[True, True])
+                nearest = nearest.drop_duplicates(subset="key")
+            
+            # Add distance column
+            distances_series = pd.Series(nearest.set_index("key")[f"dist_to_{_id}"])
+            new_columns[f"dist_to_{_id}"] = distances_series.reindex(df_projected["key"]).values
+            
+    else:
+        # If no max_distance specified, calculate for all parcels
+        nearest = gpd.sjoin_nearest(
+            df_projected,
+            gdf_projected,
+            how="left",
+            distance_col=f"dist_to_{_id}"
+        )[["key", f"dist_to_{_id}"]]
+        
+        nearest[f"dist_to_{_id}"] *= unit_factors[unit]
+        
+        # Handle duplicates in nearest
+        if nearest.duplicated(subset="key").sum() > 0:
+            nearest = nearest.sort_values(by=["key", f"dist_to_{_id}"], ascending=[True, True])
+            nearest = nearest.drop_duplicates(subset="key")
+        
+        # All parcels considered "within distance" when no max_distance specified
+        new_columns[f"within_{_id}"] = pd.Series(True, index=df_projected.index)
+        
+        # Add distance column
+        distances_series = pd.Series(nearest.set_index("key")[f"dist_to_{_id}"])
+        new_columns[f"dist_to_{_id}"] = distances_series.reindex(df_projected["key"]).values
+    
+    # Check for duplicates in input DataFrame
+    if df_in.duplicated(subset="key").sum() > 0:
+        raise ValueError("Found duplicate keys in the base dataframe, cannot perform distance calculations.")
+    
+    # Create new DataFrame with all new columns
+    new_df = pd.DataFrame(new_columns, index=df_projected.index)
+    
+    # Combine original DataFrame with new columns using concat
+    df_out = pd.concat([df_in, new_df], axis=1)
+    
+    return df_out
 
 
 def _perform_distance_calculations(df_in: gpd.GeoDataFrame, s_dist: dict, dataframes: dict[str, pd.DataFrame], unit: str = "km", verbose: bool = False) -> gpd.GeoDataFrame:
-	"""
-  Perform distance calculations based on enrichment instructions.
+    """
+    Perform distance calculations based on enrichment instructions.
 
-  :param df_in: Base GeoDataFrame.
-  :type df_in: geopandas.GeoDataFrame
-  :param s_dist: Distance calculation instructions.
-  :type s_dist: dict
-  :param dataframes: Dictionary of additional DataFrames.
-  :type dataframes: dict[str, pd.DataFrame]
-  :param unit: Unit for distance conversion (default "km").
-  :type unit: str, optional
-  :param verbose: If True, prints progress information.
-  :type verbose: bool, optional
-  :returns: GeoDataFrame with calculated distance fields.
-  :rtype: geopandas.GeoDataFrame
-  :raises ValueError: If a distance entry is invalid.
-  """
-	df = df_in.copy()
-	if verbose:
-		print(f"Performing distance calculations...")
-	for entry in s_dist:
-		if isinstance(entry, str):
-			entry = {"id": str(entry)}
-		elif not isinstance(entry, dict):
-			raise ValueError(f"Invalid distance entry: {entry}")
-		_id = entry.get("id")
-		if _id is None:
-			raise ValueError("No 'id' found in distance entry.")
-		if _id not in dataframes:
-			raise ValueError(f"Distance table '{_id}' not found in dataframes.")
-		gdf = dataframes[_id]
-		field = entry.get("field", None)
-		if verbose:
-			print(f"--> {_id}")
-		if field is None:
-			df = _do_perform_distance_calculations(df, gdf, _id, unit)
-		else:
-			uniques = gdf[field].unique()
-			for unique in uniques:
-				if pd.isna(unique):
-					continue
-				gdf_subset = gdf[gdf[field].eq(unique)]
-				df = _do_perform_distance_calculations(df, gdf_subset, f"{_id}_{unique}", unit)
-	return df
+    :param df_in: Base GeoDataFrame.
+    :type df_in: geopandas.GeoDataFrame
+    :param s_dist: Distance calculation instructions.
+    :type s_dist: dict
+    :param dataframes: Dictionary of additional DataFrames.
+    :type dataframes: dict[str, pd.DataFrame]
+    :param unit: Unit for distance conversion (default "km").
+    :type unit: str, optional
+    :param verbose: If True, prints progress information.
+    :type verbose: bool, optional
+    :returns: GeoDataFrame with calculated distance fields.
+    :rtype: geopandas.GeoDataFrame
+    :raises ValueError: If a distance entry is invalid.
+    """
+    df = df_in.copy()
+    if verbose:
+        print(f"Performing distance calculations...")
+    
+    # Collect all distance calculations to apply at once
+    all_distance_dfs = []
+    
+    for entry in s_dist:
+        if isinstance(entry, str):
+            entry = {"id": str(entry)}
+        elif not isinstance(entry, dict):
+            raise ValueError(f"Invalid distance entry: {entry}")
+            
+        _id = entry.get("id")
+        max_distance = entry.get("max_distance")  # Get max_distance from settings
+        entry_unit = entry.get("unit", unit)  # Allow overriding unit per feature
+        
+        if _id is None:
+            raise ValueError("No 'id' found in distance entry.")
+        if _id not in dataframes:
+            raise ValueError(f"Distance table '{_id}' not found in dataframes.")
+            
+        gdf = dataframes[_id]
+        field = entry.get("field", None)
+        
+        if verbose:
+            print(f"--> {_id}")
+            if max_distance is not None:
+                print(f"    max_distance: {max_distance} {entry_unit}")
+            
+        if field is None:
+            # Calculate distances for this feature
+            distance_df = _do_perform_distance_calculations(df, gdf, _id, max_distance, entry_unit)
+            # Extract only the new columns
+            new_cols = [col for col in distance_df.columns if col not in df.columns]
+            all_distance_dfs.append(distance_df[new_cols])
+            print(f"--> {_id} done")
+        else:
+            uniques = gdf[field].unique()
+            for unique in uniques:
+                if pd.isna(unique):
+                    continue
+                gdf_subset = gdf[gdf[field].eq(unique)]
+                # Calculate distances for this subset
+                distance_df = _do_perform_distance_calculations(df, gdf_subset, f"{_id}_{unique}", max_distance, entry_unit)
+                # Extract only the new columns
+                new_cols = [col for col in distance_df.columns if col not in df.columns]
+                all_distance_dfs.append(distance_df[new_cols])
+            print(f"--> {_id} done")
+    
+    # Apply all distance calculations at once
+    if all_distance_dfs:
+        # Combine all distance DataFrames
+        combined_distances = pd.concat(all_distance_dfs, axis=1)
+        # Combine with original DataFrame
+        df = pd.concat([df, combined_distances], axis=1)
+                
+    return df
 
 
 def _perform_ref_tables(df_in: pd.DataFrame | gpd.GeoDataFrame, s_ref: list | dict, dataframes: dict[str, pd.DataFrame], verbose: bool = False) -> pd.DataFrame | gpd.GeoDataFrame:

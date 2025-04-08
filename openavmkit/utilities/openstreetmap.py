@@ -141,6 +141,7 @@ class OpenStreetMapService:
         )
         
         if transportation.empty:
+            print("No transportation networks found in the area")
             return gpd.GeoDataFrame()
         
         # Project to UTM for accurate length calculation
@@ -152,6 +153,7 @@ class OpenStreetMapService:
         transportation_filtered = transportation_proj[transportation_proj['length'] >= min_length]
         
         if transportation_filtered.empty:
+            print("No transportation networks found meeting minimum length requirement of {min_length} meters")
             return gpd.GeoDataFrame()
         
         # Project back to WGS84
@@ -217,48 +219,69 @@ class OpenStreetMapService:
         
         # Define tags for educational institutions
         tags = {
-            'amenity': ['university', 'college', 'school'],
-            'building': ['university', 'college']
+            'amenity': ['university']
         }
         
         # Create polygon from bbox
         polygon = box(bbox[0], bbox[1], bbox[2], bbox[3])
         
-        # Get educational institutions from OSM
-        institutions = ox.features.features_from_polygon(
-            polygon,
-            tags=tags
-        )
-        
-        if institutions.empty:
-            return gpd.GeoDataFrame()
+        try:
+            # Get educational institutions from OSM
+            institutions = ox.features.features_from_polygon(
+                polygon,
+                tags=tags
+            )
             
-        # Project to UTM for accurate area calculation
-        utm_crs = self._get_utm_crs(bbox)
-        institutions_proj = institutions.to_crs(utm_crs)
-        
-        # Calculate areas and filter by minimum area
-        institutions_proj['area'] = institutions_proj.geometry.area
-        institutions_filtered = institutions_proj[institutions_proj['area'] >= min_area]
-        
-        if institutions_filtered.empty:
-            return gpd.GeoDataFrame()
+            if institutions.empty:
+                print(f"No educational institutions found in the area")
+                return gpd.GeoDataFrame()
+                
+            print(f"Found {len(institutions)} raw educational features")
+                
+            # Project to UTM for accurate area calculation
+            utm_crs = self._get_utm_crs(bbox)
+            institutions_proj = institutions.to_crs(utm_crs)
             
-        # Project back to WGS84
-        institutions_filtered = institutions_filtered.to_crs('EPSG:4326')
-        
-        # Clean up names
-        institutions_filtered['name'] = institutions_filtered['name'].fillna('unnamed_institution')
-        institutions_filtered['name'] = institutions_filtered['name'].str.lower().str.replace(' ', '_')
-        
-        # Create a copy for top N features
-        institutions_top = institutions_filtered.nlargest(top_n, 'area').copy()
-        
-        # Store both dataframes
-        self.features['educational'] = institutions_filtered
-        self.features['educational_top'] = institutions_top
-        
-        return institutions_filtered
+            # Fill NaN names before dissolving
+            if 'name' not in institutions_proj.columns:
+                print("Warning: 'name' column not found, using 'amenity' as identifier")
+                institutions_proj['name'] = institutions_proj['amenity'].fillna('unnamed_institution')
+            else:
+                institutions_proj['name'] = institutions_proj['name'].fillna('unnamed_institution')
+            
+            # Dissolve by name to combine multiple buildings/features of same institution
+            institutions_dissolved = institutions_proj.dissolve(by='name', as_index=False)
+            print(f"After dissolving by name: {len(institutions_dissolved)} unique institutions")
+            
+            # Calculate areas after dissolving
+            institutions_dissolved['area'] = institutions_dissolved.geometry.area
+            institutions_filtered = institutions_dissolved[institutions_dissolved['area'] >= min_area]
+            
+            if institutions_filtered.empty:
+                print(f"No educational institutions found meeting minimum area requirement of {min_area} sq meters")
+                return gpd.GeoDataFrame()
+                
+            # Project back to WGS84
+            institutions_filtered = institutions_filtered.to_crs('EPSG:4326')
+            
+            # Clean up names
+            institutions_filtered['name'] = institutions_filtered['name'].str.lower().str.replace(' ', '_')
+            
+            # Create a copy for top N features
+            institutions_top = institutions_filtered.nlargest(top_n, 'area').copy()
+            
+            # Store both dataframes
+            self.features['educational'] = institutions_filtered
+            self.features['educational_top'] = institutions_top
+            
+            return institutions_filtered
+            
+        except Exception as e:
+            print(f"Error processing educational institutions: {str(e)}")
+            print(f"Error type: {type(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            return gpd.GeoDataFrame()
     
     def get_parks(self, bbox: Tuple[float, float, float, float], settings: dict) -> gpd.GeoDataFrame:
         """
@@ -458,9 +481,11 @@ class OpenStreetMapService:
         gdf_proj = gdf.to_crs(utm_crs)
         features_proj = features.to_crs(utm_crs)
         
+        # Initialize dictionary to store all distance calculations
+        distance_data = {}
+        
         # Calculate aggregate distance (distance to nearest feature of any type)
-        distances = pd.DataFrame(index=gdf.index)
-        distances[f'dist_to_{feature_type}_any'] = gdf_proj.geometry.apply(
+        distance_data[f'dist_to_{feature_type}_any'] = gdf_proj.geometry.apply(
             lambda g: features_proj.geometry.distance(g).min()
         )
         
@@ -472,11 +497,12 @@ class OpenStreetMapService:
                 feature_geom = feature.geometry
                 feature_proj = gpd.GeoSeries([feature_geom]).to_crs(utm_crs)[0]
                 
-                distances[f'dist_to_{feature_type}_{feature_name}'] = gdf_proj.geometry.apply(
+                distance_data[f'dist_to_{feature_type}_{feature_name}'] = gdf_proj.geometry.apply(
                     lambda g: feature_proj.distance(g)
                 )
         
-        return distances
+        # Create DataFrame from all collected distances at once
+        return pd.DataFrame(distance_data, index=gdf.index)
 
     def enrich_parcels(self, gdf: gpd.GeoDataFrame, settings: Dict) -> Dict[str, gpd.GeoDataFrame]:
         """
