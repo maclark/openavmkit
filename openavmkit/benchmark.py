@@ -18,7 +18,7 @@ from openavmkit.modeling import run_mra, run_gwr, run_xgboost, run_lightgbm, run
 	predict_spatial_lag
 from openavmkit.reports import MarkdownReport, _markdown_to_pdf
 from openavmkit.time_adjustment import enrich_time_adjustment
-from openavmkit.utilities.data import div_z_safe, dataframe_to_markdown
+from openavmkit.utilities.data import div_z_safe, dataframe_to_markdown, do_per_model_group
 from openavmkit.utilities.format import fancy_format, dig2_fancy_format
 from openavmkit.utilities.modeling import NaiveSqftModel, LocalSqftModel, PassThroughModel, GWRModel, MRAModel, \
 	LarsModel, GroundTruthModel, SpatialLagModel
@@ -324,7 +324,8 @@ def run_models(
 		verbose: bool = False,
 		run_main: bool = True,
 		run_vacant: bool = True,
-		run_hedonic: bool = True
+		run_hedonic: bool = True,
+		run_ensemble: bool = True
 ):
 	"""
   Runs predictive models on the given SalesUniversePair. This function takes detailed instructions from the provided
@@ -358,6 +359,10 @@ def run_models(
   :returns: The MultiModelResults containing all model results and benchmarks.
   :rtype: MultiModelResults
   """
+
+	t = TimingData()
+
+	t.start("setup")
 	s = settings
 	s_model = s.get("modeling", {})
 	s_inst = s_model.get("instructions", {})
@@ -369,8 +374,11 @@ def run_models(
 		model_groups = get_model_group_ids(settings, df_univ)
 
 	dict_all_results = {}
+	t.stop("setup")
 
+	t.start("run model groups")
 	for model_group in model_groups:
+		t.start(f"model group: {model_group}")
 		if verbose:
 			print("")
 			print(f"*** Running models for model_group: {model_group} ***")
@@ -380,39 +388,105 @@ def run_models(
 				continue
 			if not vacant_only and not run_main:
 				continue
-			mg_results = _run_models(sup, model_group, settings, vacant_only, save_params, use_saved_params, save_results, use_saved_results, verbose, run_hedonic)
+			mg_results = _run_models(sup, model_group, settings, vacant_only, save_params, use_saved_params, save_results, use_saved_results, verbose, run_hedonic, run_ensemble)
 			dict_all_results[model_group] = mg_results
+		t.stop(f"model group: {model_group}")
+	t.stop("run model groups")
 
-	write_out_all_results(sup, dict_all_results)
+	if save_results:
+		t.start("write")
+		write_out_all_results(sup, dict_all_results)
+		t.stop("write")
+
+	print("**********TIMING FOR RUN ALL MODELS***********")
+	print(t.print())
+	print("***********************************************")
 
 	return dict_all_results
 
 
 def write_out_all_results(sup:SalesUniversePair, all_results:dict):
+	t = TimingData()
 	df_all = None
 
 	for model_group in all_results:
+		t.start(f"model group: {model_group}")
+		t.start("read")
 		mm_results:MultiModelResults = all_results[model_group]
 		ensemble:SingleModelResults = mm_results.model_results["ensemble"]
+		t.stop("read")
 
+		t.start("rename")
 		df_univ_local = ensemble.df_universe[["key", ensemble.field_prediction]].rename(columns={ensemble.field_prediction: "market_value"})
+		t.stop("rename")
+
 		df_univ_local["model_group"] = model_group
 
 		if df_all is None:
 			df_all = df_univ_local
 		else:
+			t.start("concat")
 			df_all = pd.concat([df_all, df_univ_local])
+			t.stop("concat")
 
+		t.stop(f"model group: {model_group}")
+
+	t.start("copy")
 	df_univ = sup.universe.copy()
+	t.stop("copy")
+	t.start("merge")
 	df_univ = df_univ.merge(df_all, on="key", how="left")
+	t.stop("merge")
 
 	outpath = "out/models/all_model_groups"
 	if not os.path.exists(outpath):
 		os.makedirs(outpath)
 
+	t.start("csv")
 	df_univ.to_csv(f"{outpath}/universe.csv", index=False)
+	t.stop("csv")
+	t.start("parquet")
 	df_univ.to_parquet(f"{outpath}/universe.parquet", index=False)
+	t.stop("parquet")
 
+	print("")
+	print("**********TIMING FOR WRITE OUT ALL RESULTS***********")
+	print(t.print())
+	print("***********************************************")
+
+
+def evaluate_variables(sup:SalesUniversePair, settings:dict, verbose:bool=False):
+
+	pass
+
+	# do_per_model_group(sup.universe, settings, _evaluate_variables, params={
+	# 	sup: SalesUniversePair
+	# }, key="key", verbose=verbose)
+
+	# return do_per_model_group(df_in, settings, _mark_he_ids, params={
+	# 	"settings": settings, "verbose": verbose, "settings_object": settings_object, "id_name": id_name, "output_folder": output_folder
+	# }, key="key", verbose=verbose)
+
+	#
+	# var_recs = get_variable_recommendations(
+	# 	df_sales,
+	# 	df_univ,
+	# 	vacant_only,
+	# 	settings,
+	# 	model_group,
+	# 	verbose=True,
+	# )
+	# best_variables = var_recs["variables"]
+	# var_report = var_recs["report"]
+	# var_report_md = var_report.render()
+	#
+	# os.makedirs(f"{outpath}/reports", exist_ok=True)
+	# with open(f"{outpath}/reports/variable_report.md", "w", encoding="utf-8") as f:
+	# 	f.write(var_report_md)
+	#
+	# pdf_path = f"{outpath}/reports/variable_report.pdf"
+	# formats = settings.get("analysis", {}).get("report", {}).get("formats", None)
+	# _markdown_to_pdf(var_report_md, pdf_path, css_file="variable", formats=formats)
 
 # Private functions:
 
@@ -582,8 +656,8 @@ def _predict_one_model(
 		model: str,
 		outpath: str,
 		settings: dict,
-		use_saved_results: bool = False,
-		verbose: bool = False
+		save_results: bool = False,
+		verbose: bool = False,
 ) -> SingleModelResults:
 	"""
   Predict results for one model, using saved results if available.
@@ -596,20 +670,15 @@ def _predict_one_model(
   :type outpath: str
   :param settings: The settings dictionary.
   :type settings: dict
-  :param use_saved_results: If True, loads saved results if they exist.
-  :type use_saved_results: bool, optional
+  :param save_results: If True, writes results to disk
+  :type save_results: bool, optional
   :param verbose: If True, prints additional output.
   :type verbose: bool, optional
   :returns: Updated SingleModelResults.
   :rtype: SingleModelResults
   """
 	model_name = model
-	out_pickle = f"{outpath}/model_{model_name}.pickle"
 	ds = smr.ds
-	if use_saved_results and os.path.exists(out_pickle):
-		with open(out_pickle, "rb") as file:
-			results = pickle.load(file)
-		return results
 
 	timing = TimingData()
 	timing.start("total")
@@ -667,10 +736,8 @@ def _predict_one_model(
 		catboost_regressor: CatBoostRegressor = smr.model
 		results = predict_catboost(ds, catboost_regressor, timing, verbose)
 
-	_write_model_results(results, outpath, settings)
-
-	with open(out_pickle, "wb") as file:
-		pickle.dump(results, file)
+	if save_results:
+		_write_model_results(results, outpath, settings)
 
 	return results
 
@@ -843,12 +910,11 @@ def run_one_model(
   :returns: SingleModelResults if successful, else None.
   :rtype: SingleModelResults or None
   """
+
+	t = TimingData()
+
+	t.start("setup")
 	model_name = model
-	out_pickle = f"{outpath}/model_{model_name}.pickle"
-	if use_saved_results and os.path.exists(out_pickle):
-		with open(out_pickle, "rb") as file:
-			results = pickle.load(file)
-		return results
 
 	entry: dict | None = model_entries.get(model, None)
 	default_entry: dict | None = model_entries.get("default", {})
@@ -881,7 +947,9 @@ def run_one_model(
 
 	if test_keys is None or train_keys is None:
 		test_keys, train_keys = _read_split_keys(model_group)
+	t.stop("setup")
 
+	t.start("data split")
 	ds = get_data_split_for(
 		name=model_name,
 		model_group=model_group,
@@ -901,14 +969,18 @@ def run_one_model(
 		hedonic_test_against_vacant_sales=True,
 		df_multiverse=df_multiverse
 	)
+	t.stop("data split")
 
+	t.start("setup")
 	if len(ds.y_sales) < 15:
 		if verbose:
 			print(f"--> model {model} has less than 15 sales. Skipping...")
 		return None
 
 	intercept = entry.get("intercept", True)
+	t.stop("setup")
 
+	t.start("run")
 	if model_name == "garbage":
 		results = run_garbage(ds, normal=False, sales_chase=sales_chase, verbose=verbose)
 	elif model_name == "garbage_normal":
@@ -943,11 +1015,17 @@ def run_one_model(
 		results = run_catboost(ds, outpath, save_params, use_saved_params, verbose=verbose)
 	else:
 		raise ValueError(f"Model {model_name} not found!")
+	t.stop("run")
 
-	_write_model_results(results, outpath, settings)
+	if save_results:
+		t.start("write")
+		_write_model_results(results, outpath, settings)
+		t.stop("write")
 
-	with open(out_pickle, "wb") as file:
-		pickle.dump(results, file)
+	print("")
+	print("**********TIMING FOR RUN ONE MODEL***********")
+	print(t.print())
+	print("***********************************************")
 
 	return results
 
@@ -965,7 +1043,7 @@ def run_one_hedonic_model(
 		fields_cat: list[str],
 		outpath: str,
 		hedonic_test_against_vacant_sales: bool = True,
-		use_saved_results: bool = False,
+		save_results: bool = False,
 		verbose: bool = False
 ):
 	location_field_neighborhood = get_important_field(settings, "loc_neighborhood", df_sales)
@@ -1002,7 +1080,7 @@ def run_one_hedonic_model(
 		model=model,
 		outpath=outpath,
 		settings=settings,
-		use_saved_results=use_saved_results,
+		save_results=save_results,
 		verbose=verbose
 	)
 	return results
@@ -2089,7 +2167,9 @@ def _run_hedonic_models(
 		fields_cat: list[str],
 		use_saved_results: bool = True,
 		verbose: bool = False,
-		df_multiverse: pd.DataFrame = None
+		df_multiverse: pd.DataFrame = None,
+		save_results: bool = False,
+		run_ensemble: bool = True
 ):
 	"""
   Run hedonic models and ensemble them, then update the benchmark.
@@ -2120,6 +2200,10 @@ def _run_hedonic_models(
   :type verbose: bool, optional
   :param df_multiverse: Optional multiverse DataFrame.
   :type df_multiverse: pandas.DataFrame or None
+  :param save_results: Whether to save results.
+  :type save_results: bool
+  :param run_ensemble: Whether to run ensemble models.
+  :type run_ensemble: bool, optional
   :returns: None
   """
 	hedonic_results = {}
@@ -2171,7 +2255,7 @@ def _run_hedonic_models(
 			model=model,
 			outpath=outpath,
 			settings=settings,
-			use_saved_results=use_saved_results,
+			save_results=save_results,
 			verbose=verbose
 		)
 		if results is not None:
@@ -2181,42 +2265,45 @@ def _run_hedonic_models(
 		model_results=hedonic_results,
 		benchmark=_calc_benchmark(hedonic_results)
 	)
-	best_ensemble = _optimize_ensemble(
-		df_sales=df_sales,
-		df_universe=df_universe,
-		model_group=model_group,
-		vacant_only=vacant_only,
-		dep_var=dep_var,
-		dep_var_test=dep_var_test,
-		all_results=all_hedonic_results,
-		settings=settings,
-		verbose=verbose,
-		hedonic=True
-	)
-	# Run the ensemble model
-	ensemble_results = _run_ensemble(
-		df_sales=df_sales,
-		df_universe=df_universe,
-		model_group=model_group,
-		vacant_only=vacant_only,
-		hedonic=True,
-		dep_var=dep_var,
-		dep_var_test=dep_var_test,
-		outpath=outpath,
-		ensemble_list=best_ensemble,
-		all_results=all_results,
-		settings=settings,
-		verbose=verbose,
-		df_multiverse=df_multiverse
-	)
 
-	out_pickle = f"{outpath}/model_ensemble.pickle"
-	with open(out_pickle, "wb") as file:
-		pickle.dump(ensemble_results, file)
+	if run_ensemble:
+		best_ensemble = _optimize_ensemble(
+			df_sales=df_sales,
+			df_universe=df_universe,
+			model_group=model_group,
+			vacant_only=vacant_only,
+			dep_var=dep_var,
+			dep_var_test=dep_var_test,
+			all_results=all_hedonic_results,
+			settings=settings,
+			verbose=verbose,
+			hedonic=True
+		)
+		# Run the ensemble model
+		ensemble_results = _run_ensemble(
+			df_sales=df_sales,
+			df_universe=df_universe,
+			model_group=model_group,
+			vacant_only=vacant_only,
+			hedonic=True,
+			dep_var=dep_var,
+			dep_var_test=dep_var_test,
+			outpath=outpath,
+			ensemble_list=best_ensemble,
+			all_results=all_results,
+			settings=settings,
+			verbose=verbose,
+			df_multiverse=df_multiverse
+		)
 
-	# Calculate final results, including ensemble
+		out_pickle = f"{outpath}/model_ensemble.pickle"
+		with open(out_pickle, "wb") as file:
+			pickle.dump(ensemble_results, file)
+
+		# Calculate final results, including ensemble
+			all_hedonic_results.add_model("ensemble", ensemble_results)
+
 	print("HEDONIC BENCHMARK")
-	all_hedonic_results.add_model("ensemble", ensemble_results)
 	print(all_hedonic_results.benchmark.print())
 
 
@@ -2230,7 +2317,8 @@ def _run_models(
 		save_results: bool = False,
 		use_saved_results: bool = True,
 		verbose: bool = False,
-		run_hedonic: bool = True
+		run_hedonic: bool = True,
+		run_ensemble: bool = True
 ):
 	"""
   Run models for a given model group and process ensemble results.
@@ -2253,9 +2341,18 @@ def _run_models(
   :type use_saved_results: bool, optional
   :param verbose: If True, prints additional information.
   :type verbose: bool, optional
+  :param run_hedonic: Whether to run hedonic models.
+  :type run_hedonic: bool, optional
+  :param run_ensemble: Whether to run ensemble models.
+  :type run_ensemble: bool, optional
   :returns: MultiModelResults containing all models and the final ensemble.
   :rtype: MultiModelResults
   """
+
+	t = TimingData()
+	t.start("total")
+
+	t.start("setup")
 	df_univ = sup["universe"]
 	df_sales = get_hydrated_sales_from_sup(sup)
 	df_multi = df_univ.copy()
@@ -2293,6 +2390,8 @@ def _run_models(
 
 	if len(df_sales_count) < 15:
 		warnings.warn(f"For model_group: {model_group}, vacant_only: {vacant_only}, there are fewer than 15 sales records. Model might not be any good!")
+	t.stop("setup")
+	t.start("var_recs")
 
 	var_recs = get_variable_recommendations(
 		df_sales,
@@ -2313,10 +2412,12 @@ def _run_models(
 	pdf_path = f"{outpath}/reports/variable_report.pdf"
 	formats = settings.get("analysis", {}).get("report", {}).get("formats", None)
 	_markdown_to_pdf(var_report_md, pdf_path, css_file="variable", formats=formats)
+	t.stop("var_recs")
 
 	any_results = False
 
 	# Run the models one by one and stash the results
+	t.start("run_models")
 	for model in models_to_run:
 		results = run_one_model(
 			df_multiverse=df_multi,
@@ -2348,47 +2449,58 @@ def _run_models(
 		print(f"No results generated for model_group: {model_group}, vacant_only: {vacant_only}. Skipping...")
 		return
 
+	t.stop("run_models")
+
+	t.start("calc benchmarks")
 	# Calculate initial results (ensemble will use them)
 	all_results = MultiModelResults(
 		model_results=model_results,
 		benchmark=_calc_benchmark(model_results)
 	)
+	t.stop("calc benchmarks")
 
-	best_ensemble = _optimize_ensemble(
-		df_sales=df_sales,
-		df_universe=df_univ,
-		model_group=model_group,
-		vacant_only=vacant_only,
-		dep_var=dep_var,
-		dep_var_test=dep_var_test,
-		all_results=all_results,
-		settings=settings,
-		verbose=verbose
-	)
+	if run_ensemble:
+		t.start("optimize ensemble")
+		best_ensemble = _optimize_ensemble(
+			df_sales=df_sales,
+			df_universe=df_univ,
+			model_group=model_group,
+			vacant_only=vacant_only,
+			dep_var=dep_var,
+			dep_var_test=dep_var_test,
+			all_results=all_results,
+			settings=settings,
+			verbose=verbose
+		)
+		t.stop("optimize ensemble")
 
-	# Run the ensemble model
-	ensemble_results = _run_ensemble(
-		df_sales=df_sales,
-		df_universe=df_univ,
-		model_group=model_group,
-		vacant_only=vacant_only,
-		hedonic=False,
-		dep_var=dep_var,
-		dep_var_test=dep_var_test,
-		outpath=outpath,
-		ensemble_list=best_ensemble,
-		all_results=all_results,
-		settings=settings,
-		verbose=verbose,
-		df_multiverse=df_multi
-	)
+		# Run the ensemble model
+		t.start("run ensemble")
+		ensemble_results = _run_ensemble(
+			df_sales=df_sales,
+			df_universe=df_univ,
+			model_group=model_group,
+			vacant_only=vacant_only,
+			hedonic=False,
+			dep_var=dep_var,
+			dep_var_test=dep_var_test,
+			outpath=outpath,
+			ensemble_list=best_ensemble,
+			all_results=all_results,
+			settings=settings,
+			verbose=verbose,
+			df_multiverse=df_multi
+		)
+		t.stop("run ensemble")
 
-	out_pickle = f"{outpath}/model_ensemble.pickle"
-	with open(out_pickle, "wb") as file:
-		pickle.dump(ensemble_results, file)
+		out_pickle = f"{outpath}/model_ensemble.pickle"
+		with open(out_pickle, "wb") as file:
+			pickle.dump(ensemble_results, file)
 
-	# Calculate final results, including ensemble
-	all_results.add_model("ensemble", ensemble_results)
+		# Calculate final results, including ensemble
+		t.start("calc final results")
+		all_results.add_model("ensemble", ensemble_results)
+		t.stop("calc final results")
 
 	print("")
 	if vacant_only:
@@ -2398,6 +2510,7 @@ def _run_models(
 	print(all_results.benchmark.print())
 
 	if not vacant_only and run_hedonic:
+		t.start("run hedonic models")
 		_run_hedonic_models(
 			settings=settings,
 			model_group=model_group,
@@ -2411,7 +2524,18 @@ def _run_models(
 			fields_cat=fields_cat,
 			use_saved_results=use_saved_results,
 			verbose=verbose,
-			df_multiverse=df_multi
+			df_multiverse=df_multi,
+			save_results=save_results,
+			run_ensemble=run_ensemble
 		)
+		t.stop("run hedonic models")
+
+	t.stop("total")
+
+	print("")
+	print("****** TIMING FOR _RUN_MODELS ******")
+	print(t.print())
+	print("************************************")
+	print("")
 
 	return all_results

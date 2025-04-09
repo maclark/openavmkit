@@ -25,3 +25,12 @@ class TimingData:
 
 	def get(self, key):
 		return self.results.get(key)
+
+
+	def print(self):
+		value = ""
+		for key in self.results:
+			if value != "":
+				value += "\n"
+			value += (f"{key}: {self.results[key]:.2f} seconds")
+		return value

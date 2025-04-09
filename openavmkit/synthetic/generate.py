@@ -589,7 +589,7 @@ def run_one_trial(sup: SalesUniversePair, params: dict):
           fields_cat=cat_vars,
           outpath=hedonic_outpath,
           hedonic_test_against_vacant_sales=hedonic_test_against_vacant_sales,
-          use_saved_results=False,
+          save_results=False,
           verbose=verbose
         )
         if results is not None:

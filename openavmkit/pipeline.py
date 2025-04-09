@@ -747,7 +747,8 @@ def run_models(
     verbose: bool = False,
     run_main: bool = True,
     run_vacant: bool = True,
-    run_hedonic: bool = True
+    run_hedonic: bool = True,
+    run_ensemble: bool = True
 ):
    """
    Runs predictive models on the given SalesUniversePair. This function takes detailed instructions from the provided
@@ -779,9 +780,13 @@ def run_models(
    :type run_main: bool, optional
    :param run_vacant: Flag to run vacant models.
    :type run_vacant: bool, optional
+   :param run_hedonic: Flag to run hedonic models.
+   :type run_hedonic: bool, optional
+   :param run_ensemble: Flag to run ensemble models.
+   :type run_ensemble: bool, optional
    :returns: FILL_IN_HERE: Describe the output.
    """
-   return openavmkit.benchmark.run_models(sup, settings, save_params, use_saved_params, save_results, use_saved_results, verbose, run_main, run_vacant, run_hedonic)
+   return openavmkit.benchmark.run_models(sup, settings, save_params, use_saved_params, save_results, use_saved_results, verbose, run_main, run_vacant, run_hedonic, run_ensemble)
 
 
 def finalize_land_values_sup(sup: SalesUniversePair, settings: dict, generate_boundaries: bool = False, verbose: bool = False):
