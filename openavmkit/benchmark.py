@@ -2156,6 +2156,10 @@ def _run_hedonic_models(
 			hedonic_test_against_vacant_sales=True,
 			df_multiverse=df_multiverse
 		)
+
+		# if the other one is one-hot encoded, we need to reconcile the fields
+		ds = ds.reconcile_fields_with_foreign(smr.ds)
+
 		# We call this here because we are re-running prediction without first calling run(), which would call this
 		ds.split()
 		if len(ds.y_sales) < 15:

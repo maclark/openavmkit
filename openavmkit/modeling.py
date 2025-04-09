@@ -6,6 +6,7 @@ from IPython.core.display import display
 import polars as pl
 from joblib import Parallel, delayed
 from typing import Union, Any, Dict
+from sklearn.preprocessing import OneHotEncoder
 
 import numpy as np
 import statsmodels.api as sm
@@ -531,6 +532,7 @@ class DataSplit:
       ds.df_multiverse_orig = None
     return ds
 
+
   def encode_categoricals_as_categories(self):
     """
     Convert all categorical variables in sales and universe DataFrames to the 'category' dtype.
@@ -550,93 +552,192 @@ class DataSplit:
 
     return ds
 
+  def reconcile_fields_with_foreign(self, foreign_ds):
+    """
+    Reconcile this DataSplit's fields with those of a provided reference DataSplit (foreign_ds).
+
+    The function performs the following:
+      1. One-hot encodes its own categorical columns using its existing encoding method.
+      2. Reindexes each DataFrame (train, test, universe, sales, and multiverse if present)
+         so that their columns exactly match the reference DataSplit's train columns.
+
+    Parameters:
+      foreign_ds (DataSplit): The DataSplit instance whose fields should be matched (e.g., the model's ds).
+
+    Returns:
+      DataSplit: The updated self with reconciled columns.
+    """
+
+    # check if foreign is one hot descended by checking if descendents is an empty object
+    if foreign_ds.one_hot_descendants is None or len(foreign_ds.one_hot_descendants) == 0:
+      # if so nothing is to be done here
+      return self
+
+    # First, ensure that self is one-hot encoded.
+    ds_encoded = self.encode_categoricals_with_one_hot()
+
+    # Use the train split of the foreign DataSplit as the reference.
+    reference_columns = foreign_ds.df_train.columns
+
+    # Define a helper function to reindex a DataFrame split.
+    def reindex_df(df):
+      return df.reindex(columns=reference_columns, fill_value=0.0)
+
+    # Reindex all splits in the local DataSplit so that their columns match the reference.
+    ds_encoded.df_train    = reindex_df(ds_encoded.df_train)
+    ds_encoded.df_test     = reindex_df(ds_encoded.df_test)
+    ds_encoded.df_universe = reindex_df(ds_encoded.df_universe)
+    ds_encoded.df_sales    = reindex_df(ds_encoded.df_sales)
+
+    if ds_encoded.df_multiverse is not None:
+      ds_encoded.df_multiverse = reindex_df(ds_encoded.df_multiverse)
+
+    # Update the independent variables metadata (if applicable)
+    ds_encoded.ind_vars = [col for col in reference_columns if col in ds_encoded.ind_vars]
+
+    # Optionally, you might also update any other metadata such as one-hot descendants mapping.
+    # For example, if you previously built a mapping from original categorical variables to one-hot encoded columns,
+    # you can rebuild or adjust it here.
+
+    # Build a mapping of original categorical variables to their one-hot encoded descendant columns.
+    ds_encoded.one_hot_descendants = {
+      col: [descendant for descendant in reference_columns if descendant.startswith(f"{col}_")]
+      for col in ds_encoded.categorical_vars
+    }
+
+    return ds_encoded
+
+
   def encode_categoricals_with_one_hot(self):
     """
-    One-hot encode the categorical variables in all data splits. One-hot encoding means that each unique value in a
-    categorical column is converted to a new column, and a 1 is placed in the new column for each row where the original
-    column had that value. This is useful for categorical variables that are not ordinal, and where the model should not
-    assume any particular order. For example, for a column 'color' with values 'red', 'green', and 'blue', the one-hot
-    encoding would create three new columns 'color_red', 'color_green', and 'color_blue', with 1s in the appropriate
-    column for each row.
+    One-hot encode the categorical variables in all data splits using a consistent encoder.
+    This implementation:
 
-    Performs one-hot encoding for categorical variables in universe, sales, train, test, and multiverse DataFrames,
-    cleans column names, removes original categorical columns, and updates the dependent variable list accordingly.
+    - Collects the union of categorical values from universe, sales, train, test, and (if present) multiverse.
+    - Uses scikit-learn's OneHotEncoder (with handle_unknown="ignore" and drop='first') so that output
+      dummy columns are consistent across splits.
+    - Transforms each DataFrame so that each split (universe, sales, train, test, multiverse)
+      ends up with the same set of dummy columns (reindexing missing ones to 0).
 
-    :returns: The updated DataSplit instance with one-hot encoded features.
-    :rtype: DataSplit
+    Returns:
+        DataSplit: The updated DataSplit instance with one-hot encoded features.
     """
+    # If no categorical variables to encode, return self
     if len(self.categorical_vars) == 0:
       return self
 
     ds = self.copy()
 
-    ind_vars = self.ind_vars
+    # Identify the categorical variables that need encoding.
+    # We restrict to those that appear in the independent variables.
+    cat_vars = [col for col in ds.ind_vars if col in self.categorical_vars]
 
-    cat_vars = [col for col in ind_vars if col in self.categorical_vars]
+    # Collect data from all splits where a categorical column is present.
+    dataframes_for_union = []
+    for df in [ds.df_universe, ds.df_sales, ds.df_train, ds.df_test]:
+      present_cols = [col for col in cat_vars if col in df.columns]
+      if present_cols:
+        dataframes_for_union.append(df[present_cols])
+    if ds.df_multiverse is not None:
+      present_cols = [col for col in cat_vars if col in ds.df_multiverse.columns]
+      if present_cols:
+        dataframes_for_union.append(ds.df_multiverse[present_cols])
 
-    old_cols = ds.df_universe.columns.values
-    sale_cols_not_in_univ = [col for col in ds.df_sales if (col not in ds.df_universe)]
+    # Concatenate all categorical data for a full view of unique values.
+    if dataframes_for_union:
+      union_df = pd.concat(dataframes_for_union, axis=0)
+    else:
+      return ds  # Nothing to encode
 
-    # One-hot encode the categorical variables, perform this on ds rather than self, do it for everything:
-    ds.df_universe = pd.get_dummies(ds.df_universe, columns=[col for col in cat_vars if col in ds.df_universe], drop_first=True)
-    ds.df_sales = pd.get_dummies(ds.df_sales, columns=[col for col in cat_vars if col in ds.df_sales], drop_first=True)
-    ds.df_train = pd.get_dummies(ds.df_train, columns=[col for col in cat_vars if col in ds.df_train], drop_first=True)
-    ds.df_test = pd.get_dummies(ds.df_test, columns=[col for col in cat_vars if col in ds.df_test], drop_first=True)
+    # Build a dictionary of union categories for each categorical variable.
+    union_categories = {}
+    for col in cat_vars:
+      if col in union_df.columns:
+        # Drop missing values and sort the unique values (order matters if using drop-first)
+        union_categories[col] = sorted(union_df[col].dropna().unique())
 
+    # Create the OneHotEncoder:
+    # - The 'categories' parameter is provided as a list following the order in cat_vars.
+    # - handle_unknown="ignore" ensures that any new category seen later is handled gracefully.
+    # - drop='first' mimics drop_first=True in pd.get_dummies (avoid dummy-variable trap)
+    encoder = OneHotEncoder(
+      categories=[union_categories[col] for col in cat_vars],
+      handle_unknown='ignore',
+      drop='first',
+      sparse_output=False
+    )
+
+    # Prepare a DataFrame for fitting the encoder.
+    # Ensure all categorical columns appear, even if some are missing from union_df.
+    df_for_encoding = pd.DataFrame()
+    for col in cat_vars:
+      if col in union_df.columns:
+        df_for_encoding[col] = union_df[col]
+      else:
+        # If somehow missing, create column filled with NaN.
+        df_for_encoding[col] = np.nan
+
+    # Fit the encoder on the union of the categorical data.
+    encoder.fit(df_for_encoding)
+
+    # Retrieve feature names generated by the encoder.
+    try:
+      onehot_feature_names = encoder.get_feature_names_out(cat_vars)
+    except AttributeError:
+      onehot_feature_names = encoder.get_feature_names(cat_vars)
+
+    # Define a helper function to transform a DataFrame.
+    def transform_df(df):
+      df_tmp = df.copy()
+      # Make sure all categorical columns are present for transformation.
+      for col in cat_vars:
+        if col not in df_tmp.columns:
+          df_tmp[col] = np.nan
+      # Subset to our categorical columns in the expected order.
+      df_cats = df_tmp[cat_vars]
+      # Transform using the fitted OneHotEncoder; result is a NumPy array.
+      onehot_arr = encoder.transform(df_cats)
+      # Create a DataFrame from the dummy array with proper column names.
+      onehot_df = pd.DataFrame(onehot_arr, columns=onehot_feature_names, index=df.index)
+      # Drop the original categorical columns from the DataFrame.
+      df_tmp = df_tmp.drop(columns=cat_vars, errors='ignore')
+      # Concatenate the dummy DataFrame onto the non-categorical features.
+      df_transformed = pd.concat([df_tmp, onehot_df], axis=1)
+      return df_transformed
+
+    # Transform every split.
+    ds.df_universe = transform_df(ds.df_universe)
+    ds.df_sales    = transform_df(ds.df_sales)
+    ds.df_train    = transform_df(ds.df_train)
+    ds.df_test     = transform_df(ds.df_test)
+    if ds.df_multiverse is not None:
+      ds.df_multiverse = transform_df(ds.df_multiverse)
+
+    # Clean column names.
     ds.df_universe = clean_column_names(ds.df_universe)
-    ds.df_sales = clean_column_names(ds.df_sales)
-    ds.df_train = clean_column_names(ds.df_train)
-    ds.df_test = clean_column_names(ds.df_test)
-
-    # Remove the original categorical variables:
-    ds.df_universe = ds.df_universe.drop(columns=[col for col in cat_vars if col in ds.df_universe])
-    ds.df_sales = ds.df_sales.drop(columns=[col for col in cat_vars if col in ds.df_sales])
-    ds.df_train = ds.df_train.drop(columns=[col for col in cat_vars if col in ds.df_train])
-    ds.df_test = ds.df_test.drop(columns=[col for col in cat_vars if col in ds.df_test])
-
+    ds.df_sales    = clean_column_names(ds.df_sales)
+    ds.df_train    = clean_column_names(ds.df_train)
+    ds.df_test     = clean_column_names(ds.df_test)
     if ds.df_multiverse is not None:
-      ds.df_multiverse = pd.get_dummies(ds.df_multiverse, columns=[col for col in cat_vars if col in ds.df_multiverse], drop_first=True)
       ds.df_multiverse = clean_column_names(ds.df_multiverse)
-      ds.df_multiverse = ds.df_multiverse.drop(columns=[col for col in cat_vars if col in ds.df_multiverse])
 
-    univ_cols = ds.df_universe.columns.values
-    new_cols = [col for col in ds.df_train.columns.values if col not in old_cols and col not in sale_cols_not_in_univ]
-    ind_vars += new_cols
-    ind_vars = [col for col in ind_vars if col in ds.df_train.columns]
-    ds.ind_vars = ind_vars
-
-    # sort cat vars so the longest strings come first:
-    cat_vars = sorted(cat_vars, key=len, reverse=True)
-
-    ds.one_hot_descendants = {}
-    matched = []
-    for col in new_cols:
-      for orig_col in cat_vars:
-        if col in matched:
-          continue
-        if orig_col in col:
-          if orig_col not in ds.one_hot_descendants:
-            ds.one_hot_descendants[orig_col] = []
-          ds.one_hot_descendants[orig_col].append(col)
-          matched.append(col)
-
-    train_cols = [col for col in ds.df_train.columns if col in ds.df_universe.columns]
-    train_cols_univ = train_cols.copy()
-    if "key_sale" not in train_cols:
-      train_cols = ["key_sale"] + train_cols
-
-    ds.df_universe = ds.df_universe[train_cols_univ]
-    ds.df_sales = ds.df_sales[train_cols]
+    # Ensure that all data splits have the same columns and in the same order.
+    # We use the training data columns as the reference.
+    base_columns = ds.df_train.columns
+    ds.df_universe = ds.df_universe.reindex(columns=base_columns, fill_value=0.0)
+    ds.df_sales    = ds.df_sales.reindex(columns=base_columns, fill_value=0.0)
+    ds.df_test     = ds.df_test.reindex(columns=base_columns, fill_value=0.0)
     if ds.df_multiverse is not None:
-      ds.df_multiverse = ds.df_multiverse[train_cols_univ]
+      ds.df_multiverse = ds.df_multiverse.reindex(columns=base_columns, fill_value=0.0)
 
-    test_cols = [col for col in train_cols if col in ds.df_test.columns]
-    extra_cols = [col for col in train_cols if col not in test_cols]
+    # Here, we update ds.ind_vars to include only the columns present in df_train.
+    ds.ind_vars = [col for col in base_columns if col in ds.ind_vars or col in onehot_feature_names]
 
-    ds.df_test = ds.df_test[test_cols]
-    # add extra_cols, set them to zero:
-    for col in extra_cols:
-      ds.df_test[col] = 0.0
+    # Build a mapping of original categorical variables to their one-hot encoded descendant columns.
+    ds.one_hot_descendants = {
+      orig: [col for col in onehot_feature_names if col.startswith(f"{orig}_")]
+      for orig in cat_vars
+    }
 
     return ds
 
@@ -2089,7 +2190,7 @@ def run_lightgbm(ds: DataSplit, outpath: str, save_params: bool = False, use_sav
   timing.start("total")
 
   timing.start("setup")
-  ds = ds.encode_categoricals_as_categories()
+  ds = ds.encode_categoricals_with_one_hot()
   ds.split()
   timing.stop("setup")
 
