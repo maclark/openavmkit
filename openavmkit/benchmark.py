@@ -507,7 +507,6 @@ def _calc_benchmark(model_results: dict[str, SingleModelResults]):
 		"train": [],
 		"test": [],
 		"univ": [],
-		"multi": [],
 		"chd": []
 	}
 
@@ -563,7 +562,6 @@ def _calc_benchmark(model_results: dict[str, SingleModelResults]):
 				data_time["train"].append(tim.get("train"))
 				data_time["test"].append(tim.get("predict_test"))
 				data_time["univ"].append(tim.get("predict_univ"))
-				data_time["multi"].append(tim.get("predict_multi"))
 				data_time["chd"].append(tim.get("chd"))
 			data["chd"].append(chd_results)
 
@@ -624,7 +622,6 @@ def _format_benchmark_df(df: pd.DataFrame, transpose: bool = True):
 		"train": fancy_format,
 		"test": fancy_format,
 		"univ": fancy_format,
-		"multi": fancy_format,
 		"chd": fancy_format,
 		"med_ratio": dig2_fancy_format,
 		"true_med_ratio": dig2_fancy_format,
@@ -758,8 +755,7 @@ def get_data_split_for(
 		train_keys: list[str],
 		vacant_only: bool,
 		hedonic: bool,
-		hedonic_test_against_vacant_sales: bool = True,
-		df_multiverse: pd.DataFrame | None = None
+		hedonic_test_against_vacant_sales: bool = True
 ):
 	"""
   Prepare a DataSplit object for a given model.
@@ -794,8 +790,6 @@ def get_data_split_for(
   :type vacant_only: bool
   :param hedonic: Whether to use hedonic pricing.
   :type hedonic: bool
-  :param df_multiverse: Optional multiverse DataFrame.
-  :type df_multiverse: pandas.DataFrame or None
   :returns: A DataSplit object.
   :rtype: DataSplit
   """
@@ -834,13 +828,11 @@ def get_data_split_for(
 		train_keys,
 		vacant_only=vacant_only,
 		hedonic=hedonic,
-		df_multiverse=df_multiverse,
 		hedonic_test_against_vacant_sales=hedonic_test_against_vacant_sales
 	)
 
 
 def run_one_model(
-		df_multiverse: pd.DataFrame | None,
 		df_sales: pd.DataFrame,
 		df_universe: pd.DataFrame,
 		vacant_only: bool,
@@ -865,8 +857,6 @@ def run_one_model(
 	"""
   Run a single model based on provided parameters and return its results.
 
-  :param df_multiverse: Multiverse DataFrame.
-  :type df_multiverse: pandas.DataFrame
   :param df_sales: Sales DataFrame.
   :type df_sales: pandas.DataFrame
   :param df_universe: Universe DataFrame.
@@ -966,8 +956,7 @@ def run_one_model(
 		train_keys=train_keys,
 		vacant_only=vacant_only,
 		hedonic=hedonic,
-		hedonic_test_against_vacant_sales=True,
-		df_multiverse=df_multiverse
+		hedonic_test_against_vacant_sales=True
 	)
 	t.stop("data split")
 
@@ -1031,7 +1020,6 @@ def run_one_model(
 
 
 def run_one_hedonic_model(
-		df_multiverse: pd.DataFrame,
 		df_sales: pd.DataFrame,
 		df_univ: pd.DataFrame,
 		settings: dict,
@@ -1066,8 +1054,7 @@ def run_one_hedonic_model(
 		train_keys=smr.ds.train_keys,
 		vacant_only=False,
 		hedonic=True,
-		hedonic_test_against_vacant_sales=hedonic_test_against_vacant_sales,
-		df_multiverse=df_multiverse
+		hedonic_test_against_vacant_sales=hedonic_test_against_vacant_sales
 	)
 	# We call this here because we are re-running prediction without first calling run(), which would call this
 	ds.split()
@@ -1096,7 +1083,7 @@ def _assemble_model_results(results: SingleModelResults, settings: dict):
   :type results: SingleModelResults
   :param settings: Settings dictionary.
   :type settings: dict
-  :returns: A dictionary mapping keys ("sales", "universe", "test", and optionally "multiverse") to DataFrames.
+  :returns: A dictionary mapping keys ("sales", "universe", "test") to DataFrames.
   :rtype: dict
   """
 	locations = get_report_locations(settings)
@@ -1111,9 +1098,6 @@ def _assemble_model_results(results: SingleModelResults, settings: dict):
 		"universe": results.df_universe[fields].copy(),
 		"test": results.df_test[["key_sale"]+fields].copy()
 	}
-
-	if results.df_multiverse is not None:
-		dfs["multiverse"] = results.df_multiverse[fields].copy()
 
 	for key in dfs:
 		df = dfs[key]
@@ -1439,7 +1423,6 @@ def run_ensemble(
 		settings: dict,
 		verbose: bool = False,
 		hedonic: bool = False,
-		df_multiverse: pd.DataFrame | None = None,
 		test_keys: list[str] = None,
 		train_keys: list[str] = None
 )->tuple[SingleModelResults, list[str]]:
@@ -1468,8 +1451,7 @@ def run_ensemble(
 		ensemble_list=ensemble_list,
 		all_results=all_results,
 		settings=settings,
-		verbose=verbose,
-		df_multiverse=df_multiverse
+		verbose=verbose
 	)
 	return ensemble, ensemble_list
 
@@ -1680,8 +1662,7 @@ def _run_ensemble(
 		ensemble_list: list[str],
 		all_results: MultiModelResults,
 		settings: dict,
-		verbose: bool = False,
-		df_multiverse: pd.DataFrame = None
+		verbose: bool = False
 ):
 	"""
   Run the ensemble model based on the given ensemble list and write results.
@@ -1710,8 +1691,6 @@ def _run_ensemble(
   :type settings: dict
   :param verbose: If True, prints additional information.
   :type verbose: bool, optional
-  :param df_multiverse: Optional multiverse DataFrame.
-  :type df_multiverse: pandas.DataFrame or None
   :returns: SingleModelResults for the ensemble.
   :rtype: SingleModelResults
   """
@@ -1737,24 +1716,17 @@ def _run_ensemble(
 		test_keys,
 		train_keys,
 		vacant_only=vacant_only,
-		hedonic=hedonic,
-		df_multiverse=df_multiverse
+		hedonic=hedonic
 	)
 	ds.split()
 
 	df_test = ds.df_test
 	df_sales = ds.df_sales
 	df_univ = ds.df_universe
-	df_multi = ds.df_multiverse
 
 	df_test_ensemble = df_test[["key_sale", "key"]].copy()
 	df_sales_ensemble = df_sales[["key_sale", "key"]].copy()
 	df_univ_ensemble = df_univ[["key"]].copy()
-
-	if df_multi is not None:
-		df_multi_ensemble = ds.df_multiverse[["key"]].copy()
-	else:
-		df_multi_ensemble = None
 
 	if len(ensemble_list) == 0:
 		ensemble_list = [key for key in all_results.model_results.keys()]
@@ -1774,10 +1746,7 @@ def _run_ensemble(
 		df_test_ensemble = df_test_ensemble.merge(_df_test, on="key_sale", how="left")
 		df_sales_ensemble = df_sales_ensemble.merge(_df_sales, on="key_sale", how="left")
 		df_univ_ensemble = df_univ_ensemble.merge(_df_univ, on="key", how="left")
-		if df_multi is not None:
-			_df_multi = m_results.df_multiverse[["key"]].copy()
-			_df_multi.loc[:, m_key] = m_results.pred_multi
-			df_multi_ensemble = df_multi_ensemble.merge(_df_multi, on="key", how="left")
+
 	timing.stop("train")
 
 	timing.start("predict_test")
@@ -1792,13 +1761,6 @@ def _run_ensemble(
 	y_pred_univ_ensemble = df_univ_ensemble[ensemble_list].median(axis=1)
 	timing.stop("predict_univ")
 
-	timing.start("predict_multi")
-	if df_multi is not None:
-		y_pred_multi_ensemble = df_multi_ensemble[ensemble_list].median(axis=1)
-	else:
-		y_pred_multi_ensemble = None
-	timing.stop("predict_multi")
-
 	results = SingleModelResults(
 		ds,
 		"prediction",
@@ -1809,8 +1771,7 @@ def _run_ensemble(
 		y_pred_sales=y_pred_sales_ensemble.to_numpy(),
 		y_pred_univ=y_pred_univ_ensemble.to_numpy(),
 		timing=timing,
-		verbose=verbose,
-		y_pred_multi=y_pred_multi_ensemble.to_numpy() if y_pred_multi_ensemble is not None else None
+		verbose=verbose
 	)
 	timing.stop("total")
 
@@ -1819,8 +1780,6 @@ def _run_ensemble(
 		"universe": df_univ_ensemble,
 		"test": df_test_ensemble,
 	}
-	if df_multi_ensemble is not None:
-		dfs["multiverse"] = df_multi_ensemble
 
 	_write_ensemble_model_results(results, outpath, settings, dfs, ensemble_list)
 
@@ -2167,7 +2126,6 @@ def _run_hedonic_models(
 		fields_cat: list[str],
 		use_saved_results: bool = True,
 		verbose: bool = False,
-		df_multiverse: pd.DataFrame = None,
 		save_results: bool = False,
 		run_ensemble: bool = True
 ):
@@ -2198,8 +2156,6 @@ def _run_hedonic_models(
   :type use_saved_results: bool, optional
   :param verbose: If True, prints additional information.
   :type verbose: bool, optional
-  :param df_multiverse: Optional multiverse DataFrame.
-  :type df_multiverse: pandas.DataFrame or None
   :param save_results: Whether to save results.
   :type save_results: bool
   :param run_ensemble: Whether to run ensemble models.
@@ -2237,8 +2193,7 @@ def _run_hedonic_models(
 			train_keys=smr.ds.train_keys,
 			vacant_only=False,
 			hedonic=True,
-			hedonic_test_against_vacant_sales=True,
-			df_multiverse=df_multiverse
+			hedonic_test_against_vacant_sales=True
 		)
 
 		# if the other one is one-hot encoded, we need to reconcile the fields
@@ -2292,8 +2247,7 @@ def _run_hedonic_models(
 			ensemble_list=best_ensemble,
 			all_results=all_results,
 			settings=settings,
-			verbose=verbose,
-			df_multiverse=df_multiverse
+			verbose=verbose
 		)
 
 		out_pickle = f"{outpath}/model_ensemble.pickle"
@@ -2355,7 +2309,6 @@ def _run_models(
 	t.start("setup")
 	df_univ = sup["universe"]
 	df_sales = get_hydrated_sales_from_sup(sup)
-	df_multi = df_univ.copy()
 
 	df_sales = df_sales[df_sales["model_group"].eq(model_group)].copy()
 	df_univ = df_univ[df_univ["model_group"].eq(model_group)].copy()
@@ -2420,7 +2373,6 @@ def _run_models(
 	t.start("run_models")
 	for model in models_to_run:
 		results = run_one_model(
-			df_multiverse=df_multi,
 			df_sales=df_sales,
 			df_universe=df_univ,
 			vacant_only=vacant_only,
@@ -2488,8 +2440,7 @@ def _run_models(
 			ensemble_list=best_ensemble,
 			all_results=all_results,
 			settings=settings,
-			verbose=verbose,
-			df_multiverse=df_multi
+			verbose=verbose
 		)
 		t.stop("run ensemble")
 
@@ -2524,7 +2475,6 @@ def _run_models(
 			fields_cat=fields_cat,
 			use_saved_results=use_saved_results,
 			verbose=verbose,
-			df_multiverse=df_multi,
 			save_results=save_results,
 			run_ensemble=run_ensemble
 		)

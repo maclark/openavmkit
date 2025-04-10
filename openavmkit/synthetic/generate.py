@@ -344,8 +344,7 @@ def evaluate_trial_land_results(
     all_results=main,
     settings=settings,
     verbose=verbose,
-    hedonic=False,
-    df_multiverse=None
+    hedonic=False
   )
 
   rows_h = []
@@ -543,7 +542,6 @@ def run_one_trial(sup: SalesUniversePair, params: dict):
 
   for model in models:
     results = run_one_model(
-      df_multiverse=None,
       df_sales=df_sales,
       df_universe=df_univ,
       vacant_only=vacant_only,
@@ -577,7 +575,6 @@ def run_one_trial(sup: SalesUniversePair, params: dict):
       smr = model_results[model]
       if smr is not None:
         results = run_one_hedonic_model(
-          df_multiverse=None,
           df_sales=df_sales,
           df_univ=df_univ,
           settings=settings,

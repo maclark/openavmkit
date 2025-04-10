@@ -322,7 +322,6 @@ class DataSplit:
       vacant_only: bool = False,
       hedonic: bool = False,
       days_field: str = "sale_age_days",
-      df_multiverse: pd.DataFrame | None = None,
       hedonic_test_against_vacant_sales=True,
       init: bool = True):
     """
@@ -332,7 +331,6 @@ class DataSplit:
      - Saves unmodified copies of original data.
      - Adds missing columns to universe data.
      - Enriches time fields and calculates sale age.
-     - Optionally processes multiverse data.
      - Splits sales data into training and test sets.
      - Pre-sorts data for rolling origin cross-validation.
      - Applies interactions if specified.
@@ -365,8 +363,6 @@ class DataSplit:
     :type hedonic: bool, optional
     :param days_field: Field name for sale age in days.
     :type days_field: str, optional
-    :param df_multiverse: Optional multiverse DataFrame.
-    :type df_multiverse: pandas.DataFrame or None
     :param init: Whether to perform initialization (default True).
     :type init: bool, optional
     :raises ValueError: If required fields are missing.
@@ -401,25 +397,6 @@ class DataSplit:
     self.df_universe = _enrich_time_field(self.df_universe, "sale")
     self.df_universe = _enrich_sale_age_days(self.df_universe, settings)
 
-    # The parcel "multiverse" is a parcel universe that contains *all* model groups, not just the current model group
-    self.df_multiverse_orig = None
-    self.df_multiverse = None
-    if df_multiverse is not None:
-      self.df_multiverse_orig = df_multiverse.copy()
-      self.df_multiverse = df_multiverse.copy()
-
-      # Set these fields just like we did for the universe fields
-      for col in set_to_zero:
-        self.df_multiverse[col] = 0
-      for col in set_to_false:
-        self.df_multiverse[col] = False
-      for col in set_to_none:
-        self.df_multiverse[col] = None
-
-      self.df_multiverse["sale_date"] = val_date
-      self.df_multiverse = _enrich_time_field(self.df_multiverse, "sale")
-      self.df_multiverse = _enrich_sale_age_days(self.df_multiverse, settings)
-
     self.df_sales = get_sales(df_sales, settings, vacant_only).reset_index(drop=True)
 
     self._df_sales = self.df_sales.copy()
@@ -440,8 +417,6 @@ class DataSplit:
       # transform df_universe & df_sales such that all improved characteristics are removed
       self.df_universe = simulate_removed_buildings(self.df_universe, settings)
       self.df_sales = simulate_removed_buildings(self.df_sales, settings)
-      if self.df_multiverse is not None:
-        self.df_multiverse = simulate_removed_buildings(self.df_multiverse, settings)
 
     # we also need to limit the sales set, but we can't do that AFTER we've split
 
@@ -524,12 +499,6 @@ class DataSplit:
     ds.one_hot_descendants = self.one_hot_descendants.copy()
     ds.days_field = self.days_field
 
-    if self.df_multiverse is not None:
-      ds.df_multiverse = self.df_multiverse.copy()
-      ds.df_multiverse_orig = self.df_multiverse_orig.copy()
-    else:
-      ds.df_multiverse = None
-      ds.df_multiverse_orig = None
     return ds
 
 
@@ -547,7 +516,6 @@ class DataSplit:
 
     for col in ds.categorical_vars:
       ds.df_universe[col] = ds.df_universe[col].astype("category")
-      ds.df_multiverse[col] = ds.df_multiverse[col].astype("category")
       ds.df_sales[col] = ds.df_sales[col].astype("category")
 
     return ds
@@ -558,7 +526,7 @@ class DataSplit:
 
     The function performs the following:
       1. One-hot encodes its own categorical columns using its existing encoding method.
-      2. Reindexes each DataFrame (train, test, universe, sales, and multiverse if present)
+      2. Reindexes each DataFrame (train, test, universe, sales)
          so that their columns exactly match the reference DataSplit's train columns.
 
     Parameters:
@@ -589,9 +557,6 @@ class DataSplit:
     ds_encoded.df_universe = reindex_df(ds_encoded.df_universe)
     ds_encoded.df_sales    = reindex_df(ds_encoded.df_sales)
 
-    if ds_encoded.df_multiverse is not None:
-      ds_encoded.df_multiverse = reindex_df(ds_encoded.df_multiverse)
-
     # Update the independent variables metadata (if applicable)
     ds_encoded.ind_vars = [col for col in reference_columns if col in ds_encoded.ind_vars]
 
@@ -613,10 +578,10 @@ class DataSplit:
     One-hot encode the categorical variables in all data splits using a consistent encoder.
     This implementation:
 
-    - Collects the union of categorical values from universe, sales, train, test, and (if present) multiverse.
+    - Collects the union of categorical values from universe, sales, train, test.
     - Uses scikit-learn's OneHotEncoder (with handle_unknown="ignore" and drop='first') so that output
       dummy columns are consistent across splits.
-    - Transforms each DataFrame so that each split (universe, sales, train, test, multiverse)
+    - Transforms each DataFrame so that each split (universe, sales, train, test,)
       ends up with the same set of dummy columns (reindexing missing ones to 0).
 
     Returns:
@@ -638,10 +603,6 @@ class DataSplit:
       present_cols = [col for col in cat_vars if col in df.columns]
       if present_cols:
         dataframes_for_union.append(df[present_cols])
-    if ds.df_multiverse is not None:
-      present_cols = [col for col in cat_vars if col in ds.df_multiverse.columns]
-      if present_cols:
-        dataframes_for_union.append(ds.df_multiverse[present_cols])
 
     # Concatenate all categorical data for a full view of unique values.
     if dataframes_for_union:
@@ -710,16 +671,12 @@ class DataSplit:
     ds.df_sales    = transform_df(ds.df_sales)
     ds.df_train    = transform_df(ds.df_train)
     ds.df_test     = transform_df(ds.df_test)
-    if ds.df_multiverse is not None:
-      ds.df_multiverse = transform_df(ds.df_multiverse)
 
     # Clean column names.
     ds.df_universe = clean_column_names(ds.df_universe)
     ds.df_sales    = clean_column_names(ds.df_sales)
     ds.df_train    = clean_column_names(ds.df_train)
     ds.df_test     = clean_column_names(ds.df_test)
-    if ds.df_multiverse is not None:
-      ds.df_multiverse = clean_column_names(ds.df_multiverse)
 
     # Ensure that all data splits have the same columns and in the same order.
     # We use the training data columns as the reference.
@@ -727,8 +684,6 @@ class DataSplit:
     ds.df_universe = ds.df_universe.reindex(columns=base_columns, fill_value=0.0)
     ds.df_sales    = ds.df_sales.reindex(columns=base_columns, fill_value=0.0)
     ds.df_test     = ds.df_test.reindex(columns=base_columns, fill_value=0.0)
-    if ds.df_multiverse is not None:
-      ds.df_multiverse = ds.df_multiverse.reindex(columns=base_columns, fill_value=0.0)
 
     # Here, we update ds.ind_vars to include only the columns present in df_train.
     ds.ind_vars = [col for col in base_columns if col in ds.ind_vars or col in onehot_feature_names]
@@ -786,7 +741,6 @@ class DataSplit:
     _df_sales = self.df_sales.copy()
     _df_train = self.df_train.copy()
     _df_test = self.df_test.copy()
-    _df_multi = self.df_multiverse.copy() if self.df_multiverse is not None else None
 
     if self.interactions is not None and len(self.interactions) > 0:
       for parent_field, fill_field in self.interactions.items():
@@ -804,8 +758,6 @@ class DataSplit:
             _df_train[target_field] = _df_train[target_field] * _df_train[fill_field]
           if target_field in _df_test:
             _df_test[target_field] = _df_test[target_field] * _df_test[fill_field]
-          if _df_multi is not None and target_field in _df_multi:
-            _df_multi[target_field] = _df_multi[target_field] * _df_multi[fill_field]
 
     ind_vars = [col for col in self.ind_vars if col in _df_univ.columns]
     self.X_univ = _df_univ[ind_vars]
@@ -839,14 +791,6 @@ class DataSplit:
     if "impr_he_id" in _df_train:
       self.train_impr_he_ids = _df_train["impr_he_id"]
 
-    if _df_multi is not None:
-      ind_vars = [col for col in self.ind_vars if col in _df_multi.columns]
-      self.X_multiverse = _df_multi[ind_vars]
-      self.y_multiverse = _df_multi[self.dep_var]
-    else:
-      self.X_multiverse = None
-      self.y_multiverse = None
-
     # convert all Float64 to float64 in X_train:
     for col in self.X_train.columns:
       # if it's a Float64 or a boolean, convert it to float64
@@ -871,7 +815,6 @@ class SingleModelResults:
       df_universe (pd.DataFrame): Universe DataFrame
       df_test (pd.DataFrame): Test DataFrame
       df_sales (pd.DataFrame, optional): Sales DataFrame
-      df_multiverse (pd.DataFrame, optional): Multiverse DataFrame
       type (str): Model type identifier
       dep_var (str): Independent variable name
       ind_vars (list[str]): Dependent variable names
@@ -879,7 +822,6 @@ class SingleModelResults:
       pred_test (PredictionResults): Results for the test set
       pred_sales (PredictionResults, optional): Results for the sales set
       pred_univ: Predictions for the universe (all parcels in the current scope, such as a model group)
-      pred_multi: Predictions for the multiverse (all parcels in all model groups)
       chd (float): Calculated CHD value
       utility (float): Composite utility score, used for comparing models
       timing (TimingData): Timing data for different phases of the model run
@@ -895,8 +837,8 @@ class SingleModelResults:
       y_pred_sales: np.ndarray | None,
       y_pred_univ: np.ndarray,
       timing: TimingData,
-      verbose: bool = False,
-      y_pred_multi: np.ndarray | None = None):
+      verbose: bool = False
+  ):
     """
     Initialize SingleModelResults by attaching predictions and computing performance metrics.
 
@@ -920,8 +862,6 @@ class SingleModelResults:
     :type timing: TimingData
     :param verbose: Whether to print verbose output.
     :type verbose: bool, optional
-    :param y_pred_multi: Predictions on the multiverse set
-    :type y_pred_multi: numpy.ndarray or None
     """
     self.ds = ds
 
@@ -942,14 +882,6 @@ class SingleModelResults:
       df_sales[field_prediction] = y_pred_sales
       self.df_sales = df_sales
 
-    if y_pred_multi is not None and ds.df_multiverse is not None:
-      df_multi = ds.df_multiverse.copy()
-      df_multi[field_prediction] = y_pred_multi
-      self.df_multiverse = df_multi
-    else:
-      df_multi = None
-      self.df_multiverse = None
-
     self.type = type
     self.dep_var = ds.dep_var
     self.dep_var_test = ds.dep_var_test
@@ -966,7 +898,6 @@ class SingleModelResults:
     timing.stop("stats_sales")
 
     self.pred_univ = y_pred_univ
-    self.pred_multi = y_pred_multi
 
     self._deal_with_log_and_sqft()
 
@@ -997,7 +928,6 @@ class SingleModelResults:
     if self.dep_var.startswith("log_"):
       self.pred_sales.y_pred = np.exp(self.pred_sales.y_pred)
       self.pred_univ = np.exp(self.pred_univ)
-      self.pred_multi = np.exp(self.pred_multi)
     if self.dep_var_test.startswith("log_"):
       self.pred_test.y_pred = np.exp(self.pred_test.y_pred)
 
@@ -1006,7 +936,6 @@ class SingleModelResults:
       if self.dep_var.endswith(suffix):
         self.pred_sales.y_pred = self.pred_sales.y_pred * self.ds.df_sales[suffix]
         self.pred_univ = self.pred_univ * self.ds.df_universe[suffix]
-        self.pred_multi = self.pred_multi * self.ds.df_multiverse[suffix]
       if self.dep_var_test.startswith("log_"):
         self.pred_test.y_pred = self.pred_test.y_pred * self.ds.df_test[suffix]
 
@@ -1203,13 +1132,6 @@ def predict_mra(ds: DataSplit, model: MRAModel, timing: TimingData, verbose: boo
   y_pred_univ = safe_predict(fitted_model.predict, ds.X_univ)
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    y_pred_multi = safe_predict(fitted_model.predict, ds.X_multiverse)
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   results = SingleModelResults(
@@ -1222,8 +1144,7 @@ def predict_mra(ds: DataSplit, model: MRAModel, timing: TimingData, verbose: boo
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
 
   return results
@@ -1256,8 +1177,7 @@ def run_mra(ds: DataSplit, intercept: bool = True, verbose: bool = False, model:
     ds.X_test = sm.add_constant(ds.X_test)
     ds.X_sales = sm.add_constant(ds.X_sales)
     ds.X_univ = sm.add_constant(ds.X_univ)
-    if ds.X_multiverse is not None:
-      ds.X_multiverse = sm.add_constant(ds.X_multiverse)
+
   timing.stop("setup")
 
   timing.start("parameter_search")
@@ -1313,13 +1233,6 @@ def predict_ground_truth(ds: DataSplit, ground_truth_model: GroundTruthModel, ti
   y_pred_univ = ds.df_universe[observed_field].to_numpy()# ds.X_univ[observed_field].to_numpy()
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    y_pred_multi = ds.df_multiverse[observed_field].to_numpy()#ds.X_multiverse[observed_field].to_numpy()
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   ds = ds.copy()
@@ -1336,8 +1249,7 @@ def predict_ground_truth(ds: DataSplit, ground_truth_model: GroundTruthModel, ti
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
 
   return results
@@ -1377,12 +1289,6 @@ def predict_spatial_lag(ds: DataSplit, model: SpatialLagModel, timing: TimingDat
     y_pred_univ = ds.X_univ[field].to_numpy()
     timing.stop("predict_univ")
 
-    timing.start("predict_multi")
-    if ds.df_multiverse is not None:
-      y_pred_multi = ds.X_multiverse[field].to_numpy()
-    else:
-      y_pred_multi = None
-    timing.stop("predict_multi")
   else:
     field_impr_sqft = ""
     field_land_sqft = ""
@@ -1427,19 +1333,6 @@ def predict_spatial_lag(ds: DataSplit, model: SpatialLagModel, timing: TimingDat
     )
     timing.stop("predict_univ")
 
-    # predict on the multiverse set:
-    timing.start("predict_multi")
-    if ds.df_multiverse is not None:
-      idx_vacant_multi = ds.X_multiverse["bldg_area_finished_sqft"].le(0)
-      y_pred_multi = ds.X_multiverse[field_impr_sqft].to_numpy() * ds.X_multiverse["bldg_area_finished_sqft"].to_numpy()
-      y_pred_multi[idx_vacant_multi] = (
-          ds.X_multiverse[field_land_sqft].to_numpy()[idx_vacant_multi] *
-          ds.X_multiverse["land_area_sqft"].to_numpy()[idx_vacant_multi]
-      )
-    else:
-      y_pred_multi = None
-    timing.stop("predict_multi")
-
   timing.stop("total")
 
   name = "spatial_lag"
@@ -1456,8 +1349,7 @@ def predict_spatial_lag(ds: DataSplit, model: SpatialLagModel, timing: TimingDat
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
 
   return results
@@ -1504,13 +1396,6 @@ def predict_pass_through(ds: DataSplit, model: PassThroughModel, timing: TimingD
   y_pred_univ = ds.X_univ[field].to_numpy()
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    y_pred_multi = ds.X_multiverse[field].to_numpy()
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   results = SingleModelResults(
@@ -1523,8 +1408,7 @@ def predict_pass_through(ds: DataSplit, model: PassThroughModel, timing: TimingD
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
 
   return results
@@ -1662,18 +1546,6 @@ def predict_kernel(ds: DataSplit, kr: KernelReg, timing: TimingData, verbose: bo
   X_sales = np.column_stack(vars_sales)
   X_univ = np.column_stack(vars_univ)
 
-  if ds.df_multiverse is not None:
-    u_multi = ds.df_multiverse['longitude']
-    v_multi = ds.df_multiverse['latitude']
-    vars_multi = (u_multi, v_multi)
-    for col in ds.X_multiverse.columns:
-      vars_multi += (ds.X_multiverse[col].to_numpy(),)
-    X_multi = np.column_stack(vars_multi)
-  else:
-    u_multi = None
-    v_multi = None
-    X_multi = None
-
   if verbose:
     print(f"--> predicting on test set...")
   # Predict at original locations:
@@ -1693,13 +1565,6 @@ def predict_kernel(ds: DataSplit, kr: KernelReg, timing: TimingData, verbose: bo
   y_pred_univ, _ = kr.fit(X_univ)
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    y_pred_multi, _ = kr.fit(X_multi)
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   results = SingleModelResults(
@@ -1712,8 +1577,7 @@ def predict_kernel(ds: DataSplit, kr: KernelReg, timing: TimingData, verbose: bo
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
 
   return results
@@ -1846,15 +1710,6 @@ def predict_gwr(ds: DataSplit, gwr_model: GWRModel, timing: TimingData, verbose:
   v = ds.df_universe['latitude']
   coords_univ = list(zip(u, v))
 
-  if ds.df_multiverse is not None:
-    X_multi = ds.X_multiverse.fillna(0).values.astype(np.float64)
-    u_multi = ds.df_multiverse['longitude']
-    v_multi = ds.df_multiverse['latitude']
-    coords_multi = list(zip(u_multi, v_multi))
-  else:
-    X_multi = None
-    coords_multi = None
-
   np_coords_test = np.array(coords_test)
   timing.start("predict_test")
 
@@ -1896,22 +1751,6 @@ def predict_gwr(ds: DataSplit, gwr_model: GWRModel, timing: TimingData, verbose:
   ).flatten()
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    y_pred_multi = _run_gwr_prediction(
-      coords_multi,
-      coords_train,
-      X_multi,
-      X_train,
-      gwr_bw,
-      y_train,
-      plot=False,
-      intercept=intercept
-    ).flatten()
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   model_name = "gwr"
   if diagnostic:
     model_name = "diagnostic_gwr"
@@ -1925,8 +1764,7 @@ def predict_gwr(ds: DataSplit, gwr_model: GWRModel, timing: TimingData, verbose:
     y_pred_test,
     y_pred_sales,
     y_pred_univ,
-    timing,
-    y_pred_multi=y_pred_multi
+    timing
   )
   timing.stop("total")
 
@@ -2053,13 +1891,6 @@ def predict_xgboost(ds: DataSplit, xgboost_model: xgboost.XGBRegressor, timing: 
   y_pred_univ = safe_predict(xgboost_model.predict, ds.X_univ)
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    y_pred_multi = safe_predict(xgboost_model.predict, ds.X_multiverse)
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   results = SingleModelResults(
@@ -2072,8 +1903,7 @@ def predict_xgboost(ds: DataSplit, xgboost_model: xgboost.XGBRegressor, timing: 
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
   return results
 
@@ -2143,13 +1973,6 @@ def predict_lightgbm(ds: DataSplit, gbm: lgb.Booster, timing: TimingData, verbos
   y_pred_univ = safe_predict(gbm.predict, ds.X_univ, {"num_iteration": gbm.best_iteration})
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    y_pred_multi = safe_predict(gbm.predict, ds.X_multiverse, {"num_iteration": gbm.best_iteration})
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   results = SingleModelResults(
@@ -2162,8 +1985,7 @@ def predict_lightgbm(ds: DataSplit, gbm: lgb.Booster, timing: TimingData, verbos
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
   return results
 
@@ -2265,17 +2087,6 @@ def predict_catboost(ds: DataSplit, catboost_model: catboost.CatBoostRegressor, 
     y_pred_univ = catboost_model.predict(univ_pool)
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    if len(ds.y_multiverse) == 0 or len(ds.X_multiverse) == 0:
-      y_pred_multi = np.array([])
-    else:
-      multi_pool = Pool(data=ds.X_multiverse, cat_features=cat_vars)
-      y_pred_multi = catboost_model.predict(multi_pool)
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   results = SingleModelResults(
@@ -2288,8 +2099,7 @@ def predict_catboost(ds: DataSplit, catboost_model: catboost.CatBoostRegressor, 
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
 
   return results
@@ -2381,16 +2191,6 @@ def predict_garbage(ds: DataSplit, garbage_model: GarbageModel, timing: TimingDa
     y_pred_univ = np.random.uniform(min_value, max_value, len(ds.X_univ))
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    if normal:
-      y_pred_multi = np.random.normal(loc=ds.y_train.mean(), scale=ds.y_train.std(), size=len(ds.X_multiverse))
-    else:
-      y_pred_multi = np.random.uniform(min_value, max_value, len(ds.X_multiverse))
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   df = ds.df_universe
@@ -2400,8 +2200,6 @@ def predict_garbage(ds: DataSplit, garbage_model: GarbageModel, timing: TimingDa
     y_pred_test = ds.y_test * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_test))
     y_pred_sales = ds.y_sales * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_sales))
     y_pred_univ = _sales_chase_univ(df, dep_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
-    if y_pred_multi is not None:
-      y_pred_multi = _sales_chase_univ(df, dep_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
 
   name = "garbage"
   if normal:
@@ -2419,8 +2217,7 @@ def predict_garbage(ds: DataSplit, garbage_model: GarbageModel, timing: TimingDa
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
 
   return results
@@ -2502,16 +2299,6 @@ def predict_average(ds: DataSplit, average_model: AverageModel, timing: TimingDa
     y_pred_univ = np.full(len(ds.X_univ), ds.y_train.mean())
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    if type == "median":
-      y_pred_multi = np.full(len(ds.X_multiverse), ds.y_train.median())
-    else:
-      y_pred_multi = np.full(len(ds.X_multiverse), ds.y_train.mean())
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   df = ds.df_universe
@@ -2521,8 +2308,6 @@ def predict_average(ds: DataSplit, average_model: AverageModel, timing: TimingDa
     y_pred_test = ds.y_test * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_test))
     y_pred_sales = ds.y_sales * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_sales))
     y_pred_univ = _sales_chase_univ(df, dep_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
-    if y_pred_multi is not None:
-      y_pred_multi = _sales_chase_univ(df, dep_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
 
   name = "mean"
   if type == "median":
@@ -2540,8 +2325,7 @@ def predict_average(ds: DataSplit, average_model: AverageModel, timing: TimingDa
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
 
   return results
@@ -2637,20 +2421,6 @@ def predict_naive_sqft(ds: DataSplit, sqft_model: NaiveSqftModel, timing: Timing
   X_univ.drop(columns=["prediction_impr", "prediction_vacant", "prediction"], inplace=True)
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    X_multi = ds.X_multiverse
-    X_multi_improved = X_multi[X_multi["bldg_area_finished_sqft"].gt(0)]
-    X_multi_vacant = X_multi[X_multi["bldg_area_finished_sqft"].eq(0)]
-    X_multi["prediction_impr"] = X_multi_improved["bldg_area_finished_sqft"] * ind_per_built_sqft
-    X_multi["prediction_vacant"] = X_multi_vacant["land_area_sqft"] * ind_per_land_sqft
-    X_multi["prediction"] = np.where(X_multi["bldg_area_finished_sqft"].gt(0), X_multi["prediction_impr"], X_multi["prediction_vacant"])
-    y_pred_multi = X_multi["prediction"].to_numpy()
-    X_multi.drop(columns=["prediction_impr", "prediction_vacant", "prediction"], inplace=True)
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   df = ds.df_universe
@@ -2660,8 +2430,6 @@ def predict_naive_sqft(ds: DataSplit, sqft_model: NaiveSqftModel, timing: Timing
     y_pred_test = ds.y_test * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_test))
     y_pred_sales = ds.y_sales * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_sales))
     y_pred_univ = _sales_chase_univ(df, dep_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
-    if y_pred_multi is not None:
-      y_pred_multi = _sales_chase_univ(df, dep_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
 
   name = "naive_sqft"
   if sales_chase:
@@ -2677,8 +2445,7 @@ def predict_naive_sqft(ds: DataSplit, sqft_model: NaiveSqftModel, timing: Timing
     y_pred_sales,
     y_pred_univ,
     timing,
-    verbose=verbose,
-    y_pred_multi=y_pred_multi
+    verbose=verbose
   )
 
   return results
@@ -2855,34 +2622,6 @@ def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Timing
   X_univ.drop(columns=["prediction_impr", "prediction_land", "prediction", "per_impr_sqft", "per_land_sqft"], inplace=True)
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  X_multi = ds.X_multiverse
-  if X_multi is not None:
-    X_multi["key"] = ds.df_multiverse["key"]
-    X_multi = X_multi.merge(df_land, on="key", how="left")
-    X_multi = X_multi.merge(df_impr, on="key", how="left")
-    X_multi.loc[X_multi["per_impr_sqft"].isna() | X_multi["per_impr_sqft"].eq(0), "per_impr_sqft"] = overall_per_impr_sqft
-    X_multi.loc[X_multi["per_land_sqft"].isna() | X_multi["per_land_sqft"].eq(0), "per_land_sqft"] = overall_per_land_sqft
-    X_multi = X_multi.drop(columns=["key"])
-
-    X_multi_improved = X_multi[X_multi["bldg_area_finished_sqft"].gt(0)]
-    X_multi_vacant = X_multi[X_multi["bldg_area_finished_sqft"].eq(0)]
-    X_multi["prediction_impr"] = X_multi_improved["bldg_area_finished_sqft"] * X_multi_improved["per_impr_sqft"]
-    X_multi["prediction_land"] = X_multi_vacant["land_area_sqft"] * X_multi_vacant["per_land_sqft"]
-    X_multi.loc[X_multi["prediction_impr"].isna() | X_multi["prediction_impr"].eq(0), "prediction_impr"] = overall_per_impr_sqft
-    X_multi.loc[X_multi["prediction_land"].isna() | X_multi["prediction_land"].eq(0), "prediction_land"] = overall_per_land_sqft
-    X_multi["prediction"] = np.where(
-      ~X_multi["bldg_area_finished_sqft"].isna() &
-      X_multi["bldg_area_finished_sqft"].gt(0),
-      X_multi["prediction_impr"],
-      X_multi["prediction_land"]
-    )
-    y_pred_multi = X_multi["prediction"].to_numpy()
-    X_multi.drop(columns=["prediction_impr", "prediction_land", "prediction", "per_impr_sqft", "per_land_sqft"], inplace=True)
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   df = ds.df_universe
@@ -2892,8 +2631,6 @@ def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Timing
     y_pred_test = ds.y_test * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_test))
     y_pred_sales = ds.y_sales * np.random.choice([1-sales_chase, 1+sales_chase], len(ds.y_sales))
     y_pred_univ = _sales_chase_univ(df, dep_var, y_pred_univ) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_univ))
-    if y_pred_multi is not None:
-      y_pred_multi = _sales_chase_univ(df, dep_var, y_pred_multi) * np.random.choice([1-sales_chase, 1+sales_chase], len(y_pred_multi))
 
   name = "local_sqft"
 
@@ -2909,8 +2646,7 @@ def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Timing
     y_pred_test,
     y_pred_sales,
     y_pred_univ,
-    timing,
-    y_pred_multi=y_pred_multi
+    timing
   )
 
   return results
@@ -3132,17 +2868,6 @@ def predict_lars(ds: DataSplit, lars_model: LarsModel, timing: TimingData, verbo
   y_pred_univ = results.pred_univ + X_univ["total_adjustment"]
   timing.stop("predict_univ")
 
-  timing.start("predict_multi")
-  if ds.df_multiverse is not None:
-    X_multi = ds.df_multiverse[ds.ind_vars + ["impr_he_id", "land_he_id"]].copy()
-    X_multi["impr_adjustment"] = X_multi["impr_he_id"].map(lars_model.impr_adjustments).fillna(0.0) * X_multi["bldg_area_finished_sqft"].to_numpy()
-    X_multi["land_adjustment"] = X_multi["land_he_id"].map(lars_model.land_adjustments).fillna(0.0) * X_multi["land_area_sqft"].to_numpy()
-    X_multi["total_adjustment"] = X_multi["impr_adjustment"] + X_multi["land_adjustment"]
-    y_pred_multi = results.pred_multi + X_multi["total_adjustment"]
-  else:
-    y_pred_multi = None
-  timing.stop("predict_multi")
-
   timing.stop("total")
 
   name = "lars"
@@ -3156,8 +2881,7 @@ def predict_lars(ds: DataSplit, lars_model: LarsModel, timing: TimingData, verbo
     y_pred_test,
     y_pred_sales,
     y_pred_univ,
-    timing,
-    y_pred_multi=y_pred_multi
+    timing
   )
 
   return results

@@ -780,14 +780,9 @@ def _run_land_analysis(
         if os.path.exists(filepath):
           with open(filepath, "rb") as file:
             results = pickle.load(file)
-            if results.df_multiverse is not None:
-              print(f"Yes multiverse found for model: {model}")
-              df = results.df_multiverse[["key"]].copy()
-              df.loc[:, "prediction"] = results.pred_multi
-            else:
-              print(f"No multiverse found for model: {model}, using universe instead")
-              df = results.df_universe[["key"]].copy()
-              df.loc[:, "prediction"] = results.pred_univ
+            print(f"No multiverse found for model: {model}, using universe instead")
+            df = results.df_universe[["key"]].copy()
+            df.loc[:, "prediction"] = results.pred_univ
             results_map[key][model] = df
             if key != "main":
               land_results[f"{short_key}_{model}"] = results
@@ -905,8 +900,7 @@ def _run_land_analysis(
     ensemble_list=best_ensemble,
     all_results=all_land_results,
     settings=settings,
-    verbose=verbose,
-    df_multiverse=df_in
+    verbose=verbose
   )
 
   all_land_results.add_model("ensemble", ensemble_results)
