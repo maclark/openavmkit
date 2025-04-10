@@ -855,7 +855,7 @@ class DataSplit:
           self.X_train[col].dtype == "boolean" or
           self.X_train[col].dtype == "bool"
       ):
-        self.X_train.loc[:, col] = self.X_train[col].astype("float64")
+        self.X_train = self.X_train.astype({col: "float64"})
 
     ind_vars = [col for col in self.ind_vars if col in _df_test.columns]
     self.X_test = _df_test[ind_vars]
