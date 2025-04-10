@@ -177,6 +177,7 @@ def try_variables(
 				settings,
 				model_group,
 				variables_to_use=variables_to_use,
+				skip_vif=True,
 				verbose=verbose
 			)
 			best_variables = var_recs["variables"]
@@ -201,6 +202,10 @@ def try_variables(
 
 	do_per_model_group(df_hydrated, settings, _try_variables, params={"settings": settings, "df_univ": sup.universe, "outpath":base_path, "verbose": verbose, "results": all_best_variables}, key="key_sale")
 
+	variables_to_use = settings.get("modeling", {}).get("experiment", {}).get("variables", [])
+
+	variables_used = []
+
 	print("")
 	print("********** BEST VARIABLES ***********")
 	for model_group in all_best_variables:
@@ -212,7 +217,16 @@ def try_variables(
 			i = 1
 			for var in best_vars:
 				print(f"{i}. {var}")
+				if var not in variables_used:
+					variables_used.append(var)
 				i += 1
+
+	worst_variables = [var for var in variables_to_use if var not in variables_used]
+
+	print("")
+	print("************* WORST VARIABLES ***********")
+	for var in worst_variables:
+		print(var)
 
 	#
 	# var_recs = openavmkit.get_variable_recommendations(
@@ -246,6 +260,7 @@ def get_variable_recommendations(
 		settings: dict,
 		model_group: str,
 		variables_to_use: list[str] | None = None,
+		skip_vif: bool = False,
 		verbose: bool = False
 ):
 	"""
@@ -267,6 +282,8 @@ def get_variable_recommendations(
   :type model_group: str
   :param variables_to_use: A list of variables to use for feature selection. If None, variables are pulled from modeling section
   :type variables_to_use: list[str] | None
+  :param skip_vif: If True, skips VIF calculation (which takes the longest time).
+  :type skip_vif: bool
   :param verbose: If True, prints additional debugging information.
   :type verbose: bool, optional	
   :returns: A dictionary with keys "variables" (the best variables list) and "report" (the generated report).
@@ -282,12 +299,12 @@ def get_variable_recommendations(
 		df_sales = enrich_time_adjustment(df_sales, settings, verbose=verbose)
 
 	if verbose:
-		print("Using variables:")
-		for variable in variables_to_use:
-			print(variable)
-
+		print("==> PREPARING")
 	ds = _prepare_ds(df_sales, df_universe, model_group, vacant_only, settings, variables_to_use)
 	ds = ds.encode_categoricals_with_one_hot()
+
+	if verbose:
+		print("==> SPLITTING")
 	ds.split()
 
 	feature_selection = settings.get("modeling", {}).get("instructions", {}).get("feature_selection", {})
@@ -296,10 +313,14 @@ def get_variable_recommendations(
 	X_sales = ds.X_sales[ds.ind_vars]
 	y_sales = ds.y_sales
 
+	if verbose:
+		print("==> CORRELATING")
 	# Correlation
 	X_corr = ds.df_sales[[ds.dep_var] + ds.ind_vars]
 	corr_results = calc_correlations(X_corr, thresh.get("correlation", 0.1))
 
+	if verbose:
+		print("==> ENR")
 	# Elastic net regularization
 	try:
 		enr_coefs = calc_elastic_net_regularization(X_sales, y_sales, thresh.get("enr", 0.01))
@@ -311,18 +332,31 @@ def get_variable_recommendations(
 		print(f"Columns with nulls: {cols_with_null}")
 		raise e
 
+	if verbose:
+		print("==> R2")
 	# R² values
 	r2_values = calc_r2(ds.df_sales, ds.ind_vars, y_sales)
 
+	if verbose:
+		print("==> P VALUES")
 	# P Values
 	p_values = calc_p_values_recursive_drop(X_sales, y_sales, thresh.get("p_value", 0.05))
 
+	if verbose:
+		print("==> T VALUES")
 	# T Values
 	t_values = calc_t_values_recursive_drop(X_sales, y_sales, thresh.get("t_value", 2))
 
+	if verbose:
+		print("==> VIF")
 	# VIF
-	vif = calc_vif_recursive_drop(X_sales, thresh.get("vif", 10))
+	if skip_vif:
+		vif = None
+	else:
+		vif = calc_vif_recursive_drop(X_sales, thresh.get("vif", 10))
 
+	if verbose:
+		print("==> CALC RECS")
 	# Generate final results & recommendations
 	df_results = _calc_variable_recommendations(
 		ds=ds,
@@ -340,6 +374,8 @@ def get_variable_recommendations(
 	best_variables = curr_variables.copy()
 	best_score = float('inf')
 
+	if verbose:
+		print("==> CROSS VALIDATING")
 	y = ds.y_sales
 	while len(curr_variables) > 0:
 		X = ds.df_sales[curr_variables]
@@ -355,6 +391,8 @@ def get_variable_recommendations(
 		if verbose:
 			print(f"--> score: {cv_score:,.0f}  {len(curr_variables)} variables: {curr_variables}")
 
+	if verbose:
+		print("==> TABLE")
 	# Create a table from the list of best variables.
 	df_best = pd.DataFrame(best_variables, columns=["Variable"])
 	df_best["Rank"] = range(1, len(df_best) + 1)
@@ -369,6 +407,8 @@ def get_variable_recommendations(
 	df_best.set_index("Rank", inplace=True)
 	report.set_var("summary_table", df_best.to_markdown())
 
+	if verbose:
+		print("==> REPORT")
 	report = generate_variable_report(report, settings, model_group, best_variables)
 
 	return {
@@ -2013,7 +2053,8 @@ def _calc_variable_recommendations(
 	df = pd.merge(df, r2_values_results, on="variable", how="outer")
 	df = pd.merge(df, p_values_results["final"], on="variable", how="outer")
 	df = pd.merge(df, t_values_results["final"], on="variable", how="outer")
-	df = pd.merge(df, vif_results["final"], on="variable", how="outer")
+	if vif_results is not None:
+		df = pd.merge(df, vif_results["final"], on="variable", how="outer")
 
 	df["weighted_score"] = 0
 
@@ -2034,7 +2075,8 @@ def _calc_variable_recommendations(
 	df.loc[df["enr_coef"].notna(), "weighted_score"] += weight_enr_coef
 	df.loc[df["p_value"].notna(), "weighted_score"] += weight_p_value
 	df.loc[df["t_value"].notna(), "weighted_score"] += weight_t_value
-	df.loc[df["vif"].notna(), "weighted_score"] += weight_vif
+	if vif_results is not None:
+		df.loc[df["vif"].notna(), "weighted_score"] += weight_vif
 
 	# check if "enr_coefficient", "t_value", and "coef_sign" are pointing in the same direction:
 	df.loc[
@@ -2134,17 +2176,20 @@ def _calc_variable_recommendations(
 
 			# TODO: refactor this down to DRY it out a bit
 
-			# VIF:
-			dfr_vif = vif_results[state][["variable", "vif"]].copy()
-			dfr_vif = dfr_vif.sort_values(by="vif", ascending=True)
-			dfr_vif["Pass/Fail"] = dfr_vif["vif"].apply(lambda x: "✅" if x < thresh_vif else "❌")
-			dfr_vif["vif"] = dfr_vif["vif"].apply(lambda x: f"{x:.2f}" if x < 10 else f"{x:.1f}" if x < 100 else f"{x:,.0f}").astype("string")
-			dfr_vif = dfr_vif.rename(columns=vif_renames)
-			dfr_vif["Rank"] = range(1, len(dfr_vif) + 1)
-			dfr_vif = dfr_vif[["Rank", "Variable", "VIF", "Pass/Fail"]]
-			dfr_vif.set_index("Rank", inplace=True)
-			dfr_vif = apply_dd_to_df_rows(dfr_vif, "Variable", settings, ds.one_hot_descendants)
-			report.set_var(f"table_vif_{state}", dataframe_to_markdown(dfr_vif))
+			if vif_results is not None:
+				# VIF:
+				dfr_vif = vif_results[state][["variable", "vif"]].copy()
+				dfr_vif = dfr_vif.sort_values(by="vif", ascending=True)
+				dfr_vif["Pass/Fail"] = dfr_vif["vif"].apply(lambda x: "✅" if x < thresh_vif else "❌")
+				dfr_vif["vif"] = dfr_vif["vif"].apply(lambda x: f"{x:.2f}" if x < 10 else f"{x:.1f}" if x < 100 else f"{x:,.0f}").astype("string")
+				dfr_vif = dfr_vif.rename(columns=vif_renames)
+				dfr_vif["Rank"] = range(1, len(dfr_vif) + 1)
+				dfr_vif = dfr_vif[["Rank", "Variable", "VIF", "Pass/Fail"]]
+				dfr_vif.set_index("Rank", inplace=True)
+				dfr_vif = apply_dd_to_df_rows(dfr_vif, "Variable", settings, ds.one_hot_descendants)
+				report.set_var(f"table_vif_{state}", dataframe_to_markdown(dfr_vif))
+			else:
+				report.set_var(f"table_vif_{state}", "N/A")
 
 			# P-value:
 			dfr_p_value = p_values_results[state][["variable", "p_value"]].copy()
@@ -2224,7 +2269,11 @@ def _calc_variable_recommendations(
 		dfr["Rank"] = range(1, len(dfr) + 1)
 		dfr = apply_dd_to_df_rows(dfr, "Variable", settings, ds.one_hot_descendants)
 
-		dfr = dfr[["Rank", "Weighted Score", "Variable", "VIF", "P Value", "T Value", "ENR", "Correlation", "Coef. sign", "R-squared"]]
+		the_cols = ["Rank", "Weighted Score", "Variable", "VIF", "P Value", "T Value", "ENR", "Correlation", "Coef. sign", "R-squared"]
+		if vif_results is None:
+			the_cols.remove("VIF")
+
+		dfr = dfr[the_cols]
 		dfr.set_index("Rank", inplace=True)
 		for col in dfr.columns:
 			if col == "R-squared":
