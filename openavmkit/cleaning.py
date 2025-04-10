@@ -36,6 +36,13 @@ def clean_valid_sales(sup: SalesUniversePair, settings : dict):
 	# mark which sales are to be used (only those that are valid and within the specified time frame)
 	df_sales.loc[df_sales["sale_year"].lt(use_sales_from), "valid_sale"] = False
 
+	# sale prices of 0 and negative and null are invalid
+	df_sales.loc[
+		df_sales["sale_price"].isna() |
+		df_sales["sale_price"].le(0),
+		"valid_sale"
+	] = False
+
 	# drop all invalid sales:
 	df_sales = df_sales[df_sales["valid_sale"].eq(True)].copy()
 
