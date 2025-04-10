@@ -557,7 +557,6 @@ def run_one_trial(sup: SalesUniversePair, params: dict):
       save_params=True,
       use_saved_params=True,
       save_results=False,
-      use_saved_results=params.get("use_saved_results", False),
       verbose=verbose,
       hedonic=False,
       test_keys=test_keys,

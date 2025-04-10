@@ -125,12 +125,127 @@ class MultiModelResults:
 		self.benchmark = _calc_benchmark(self.model_results)
 
 
+def try_variables(
+		sup: SalesUniversePair,
+		settings: dict,
+		verbose: bool = False
+):
+
+	df_hydrated = get_hydrated_sales_from_sup(sup)
+
+	all_best_variables = {}
+	base_path = "out/reports"
+
+	def _try_variables(
+			df_in: pd.DataFrame,
+			model_group: str,
+			df_univ: pd.DataFrame,
+			outpath: str,
+			settings: dict,
+			verbose: bool,
+			results: dict
+	):
+		bests = {}
+
+		if verbose:
+			print(f"--> for model group: {model_group}")
+
+		for vacant_only in [False, True]:
+			if verbose:
+				print(f"----> vacant_only: {vacant_only}")
+
+			if vacant_only:
+				if df_in["vacant_sale"].sum() == 0:
+					if verbose:
+						print("No vacant sales found, skipping...")
+					continue
+			else:
+				if df_in["valid_sale"].sum() == 0:
+					if verbose:
+						print("No valid sales found, skipping...")
+					continue
+
+			variables_to_use = settings.get("modeling", {}).get("experiment", {}).get("variables", [])
+			if len(variables_to_use) == 0:
+				raise ValueError("No variables defined. Please check settings `modeling.experiment.variables`")
+
+			df_univ = df_univ[df_univ["model_group"].eq(model_group)].copy()
+			var_recs = get_variable_recommendations(
+				df_in,
+				df_univ,
+				vacant_only,
+				settings,
+				model_group,
+				variables_to_use=variables_to_use,
+				verbose=verbose
+			)
+			best_variables = var_recs["variables"]
+			var_report = var_recs["report"]
+			var_report_md = var_report.render()
+
+			report_path = f"{outpath}/{model_group}"
+
+			os.makedirs(report_path, exist_ok=True)
+			with open(f"{report_path}/variable_report.md", "w", encoding="utf-8") as f:
+				f.write(var_report_md)
+			pdf_path = f"{report_path}/variable_report.pdf"
+			formats = settings.get("analysis", {}).get("report", {}).get("formats", None)
+			_markdown_to_pdf(var_report_md, pdf_path, css_file="variable", formats=formats)
+
+			if vacant_only:
+				bests["vacant_only"] = best_variables
+			else:
+				bests["main"] = best_variables
+
+		results[model_group] = bests
+
+	do_per_model_group(df_hydrated, settings, _try_variables, params={"settings": settings, "df_univ": sup.universe, "outpath":base_path, "verbose": verbose, "results": all_best_variables}, key="key_sale")
+
+	print("")
+	print("********** BEST VARIABLES ***********")
+	for model_group in all_best_variables:
+		entry = all_best_variables[model_group]
+		for vacant_status in entry:
+			print("")
+			print(f"model group: {model_group} / {vacant_status}")
+			best_vars = entry[vacant_status]
+			i = 1
+			for var in best_vars:
+				print(f"{i}. {var}")
+				i += 1
+
+	#
+	# var_recs = openavmkit.get_variable_recommendations(
+	#    df_sales,
+	#    df_univ,
+	#    vacant_only,
+	#    settings,
+	#    model_group,
+	#    verbose=True,
+	# )
+	# best_variables = var_recs["variables"]
+	#
+	# # var_report = var_recs["report"]
+	# # var_report_md = var_report.render()
+	# #
+	# # os.makedirs(f"{outpath}/reports", exist_ok=True)
+	# # with open(f"{outpath}/reports/variable_report.md", "w", encoding="utf-8") as f:
+	# # 	f.write(var_report_md)
+	# #
+	# # pdf_path = f"{outpath}/reports/variable_report.pdf"
+	# # formats = settings.get("analysis", {}).get("report", {}).get("formats", None)
+	# # _markdown_to_pdf(var_report_md, pdf_path, css_file="variable", formats=formats)
+	# # t.stop("var_recs")
+
+
+
 def get_variable_recommendations(
 		df_sales: pd.DataFrame,
 		df_universe: pd.DataFrame,
 		vacant_only: bool,
 		settings: dict,
 		model_group: str,
+		variables_to_use: list[str] | None = None,
 		verbose: bool = False
 ):
 	"""
@@ -150,6 +265,8 @@ def get_variable_recommendations(
   :type settings: dict
   :param model_group: The model group to consider.
   :type model_group: str
+  :param variables_to_use: A list of variables to use for feature selection. If None, variables are pulled from modeling section
+  :type variables_to_use: list[str] | None
   :param verbose: If True, prints additional debugging information.
   :type verbose: bool, optional	
   :returns: A dictionary with keys "variables" (the best variables list) and "report" (the generated report).
@@ -164,7 +281,12 @@ def get_variable_recommendations(
 		warnings.warn("Time adjustment was not found in sales data. Calculating now...")
 		df_sales = enrich_time_adjustment(df_sales, settings, verbose=verbose)
 
-	ds = _prepare_ds(df_sales, df_universe, model_group, vacant_only, settings)
+	if verbose:
+		print("Using variables:")
+		for variable in variables_to_use:
+			print(variable)
+
+	ds = _prepare_ds(df_sales, df_universe, model_group, vacant_only, settings, variables_to_use)
 	ds = ds.encode_categoricals_with_one_hot()
 	ds.split()
 
@@ -184,6 +306,9 @@ def get_variable_recommendations(
 	except ValueError as e:
 		nulls_in_X = X_sales[X_sales.isna().any(axis=1)]
 		print(f"Found {len(nulls_in_X)} rows with nulls in X:")
+		# identify columns with nulls in them:
+		cols_with_null = nulls_in_X.columns[nulls_in_X.isna().any()].tolist()
+		print(f"Columns with nulls: {cols_with_null}")
 		raise e
 
 	# R² values
@@ -320,7 +445,6 @@ def run_models(
 		save_params: bool = True,
 		use_saved_params: bool = True,
 		save_results: bool = True,
-		use_saved_results: bool = True,
 		verbose: bool = False,
 		run_main: bool = True,
 		run_vacant: bool = True,
@@ -348,8 +472,6 @@ def run_models(
   :type use_saved_params: bool, optional
   :param save_results: Whether to save model results.
   :type save_results: bool, optional
-  :param use_saved_results: Whether to use saved model results.
-  :type use_saved_results: bool, optional
   :param verbose: If True, prints additional information.
   :type verbose: bool, optional
   :param run_main: Whether to run main (non-vacant) models.
@@ -359,6 +481,8 @@ def run_models(
   :returns: The MultiModelResults containing all model results and benchmarks.
   :rtype: MultiModelResults
   """
+
+	print("YO")
 
 	t = TimingData()
 
@@ -388,7 +512,7 @@ def run_models(
 				continue
 			if not vacant_only and not run_main:
 				continue
-			mg_results = _run_models(sup, model_group, settings, vacant_only, save_params, use_saved_params, save_results, use_saved_results, verbose, run_hedonic, run_ensemble)
+			mg_results = _run_models(sup, model_group, settings, vacant_only, save_params, use_saved_params, save_results, verbose, run_hedonic, run_ensemble)
 			dict_all_results[model_group] = mg_results
 		t.stop(f"model group: {model_group}")
 	t.stop("run model groups")
@@ -848,7 +972,6 @@ def run_one_model(
 		save_params: bool,
 		use_saved_params: bool,
 		save_results: bool,
-		use_saved_results: bool,
 		verbose: bool = False,
 		hedonic: bool = False,
 		test_keys: list[str] | None = None,
@@ -887,8 +1010,6 @@ def run_one_model(
   :type use_saved_params: bool
   :param save_results: Whether to save results.
   :type save_results: bool
-  :param use_saved_results: Whether to load saved results if available.
-  :type use_saved_results: bool
   :param verbose: If True, prints additional information.
   :type verbose: bool, optional
   :param hedonic: Whether to use hedonic pricing.
@@ -1791,7 +1912,8 @@ def _prepare_ds(
 		df_universe: pd.DataFrame,
 		model_group: str,
 		vacant_only: bool,
-		settings: dict
+		settings: dict,
+		ind_vars: list[str] | None = None,
 ):
 	"""
   Prepare a DataSplit object for modeling.
@@ -1806,6 +1928,8 @@ def _prepare_ds(
   :type vacant_only: bool
   :param settings: Settings dictionary.
   :type settings: dict
+  :param ind_vars: List of independent variables (optional)
+  :type ind_vars: list[str] | None
   :returns: A DataSplit object.
   :rtype: DataSplit
   """
@@ -1815,9 +1939,10 @@ def _prepare_ds(
 	model_entries = s_model.get("models", {}).get(vacant_status, {})
 	entry: dict | None = model_entries.get("model", model_entries.get("default", {}))
 
-	ind_vars: list | None = entry.get("ind_vars", None)
 	if ind_vars is None:
-		raise ValueError(f"ind_vars not found for model 'default'")
+		ind_vars: list | None = entry.get("ind_vars", None)
+		if ind_vars is None:
+			raise ValueError(f"ind_vars not found for model 'default'")
 
 	fields_cat = get_fields_categorical(s, df_sales)
 	interactions = get_variable_interactions(entry, s, df_sales)
@@ -2124,7 +2249,6 @@ def _run_hedonic_models(
 		dep_var: str,
 		dep_var_test: str,
 		fields_cat: list[str],
-		use_saved_results: bool = True,
 		verbose: bool = False,
 		save_results: bool = False,
 		run_ensemble: bool = True
@@ -2152,8 +2276,6 @@ def _run_hedonic_models(
   :type dep_var_test: str
   :param fields_cat: List of categorical fields.
   :type fields_cat: list[str]
-  :param use_saved_results: Whether to use saved results if available.
-  :type use_saved_results: bool, optional
   :param verbose: If True, prints additional information.
   :type verbose: bool, optional
   :param save_results: Whether to save results.
@@ -2269,7 +2391,6 @@ def _run_models(
 		save_params: bool = True,
 		use_saved_params: bool = True,
 		save_results: bool = False,
-		use_saved_results: bool = True,
 		verbose: bool = False,
 		run_hedonic: bool = True,
 		run_ensemble: bool = True
@@ -2291,8 +2412,6 @@ def _run_models(
   :type use_saved_params: bool, optional
   :param save_results: Whether to save results.
   :type save_results: bool
-  :param use_saved_results: Whether to use saved results if available.
-  :type use_saved_results: bool, optional
   :param verbose: If True, prints additional information.
   :type verbose: bool, optional
   :param run_hedonic: Whether to run hedonic models.
@@ -2355,17 +2474,18 @@ def _run_models(
 		verbose=True,
 	)
 	best_variables = var_recs["variables"]
-	var_report = var_recs["report"]
-	var_report_md = var_report.render()
 
-	os.makedirs(f"{outpath}/reports", exist_ok=True)
-	with open(f"{outpath}/reports/variable_report.md", "w", encoding="utf-8") as f:
-		f.write(var_report_md)
-
-	pdf_path = f"{outpath}/reports/variable_report.pdf"
-	formats = settings.get("analysis", {}).get("report", {}).get("formats", None)
-	_markdown_to_pdf(var_report_md, pdf_path, css_file="variable", formats=formats)
-	t.stop("var_recs")
+	# var_report = var_recs["report"]
+	# var_report_md = var_report.render()
+	#
+	# os.makedirs(f"{outpath}/reports", exist_ok=True)
+	# with open(f"{outpath}/reports/variable_report.md", "w", encoding="utf-8") as f:
+	# 	f.write(var_report_md)
+	#
+	# pdf_path = f"{outpath}/reports/variable_report.pdf"
+	# formats = settings.get("analysis", {}).get("report", {}).get("formats", None)
+	# _markdown_to_pdf(var_report_md, pdf_path, css_file="variable", formats=formats)
+	# t.stop("var_recs")
 
 	any_results = False
 
@@ -2388,7 +2508,6 @@ def _run_models(
 			save_params=save_params,
 			use_saved_params=use_saved_params,
 			save_results=save_results,
-			use_saved_results=use_saved_results,
 			verbose=verbose
 		)
 		if results is not None:
@@ -2473,7 +2592,6 @@ def _run_models(
 			dep_var=dep_var,
 			dep_var_test=dep_var_test,
 			fields_cat=fields_cat,
-			use_saved_results=use_saved_results,
 			verbose=verbose,
 			save_results=save_results,
 			run_ensemble=run_ensemble

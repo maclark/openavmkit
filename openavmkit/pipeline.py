@@ -25,6 +25,7 @@ import openavmkit.checkpoint
 import openavmkit.ratio_study
 import openavmkit.horizontal_equity_study
 import openavmkit.cleaning
+from openavmkit.benchmark import get_variable_recommendations
 
 from openavmkit.cleaning import clean_valid_sales
 from openavmkit.cloud import cloud
@@ -739,13 +740,132 @@ def read_pickle(path: str):
 
 # Modeling stuff
 
+
+def try_variables(
+    sup: SalesUniversePair,
+    settings: dict,
+    verbose: bool = False
+):
+
+   sup = fill_unknown_values_sup(sup, settings)
+   openavmkit.benchmark.try_variables(
+      sup,
+      settings,
+      verbose
+   )
+
+
+def try_models(
+    sup: SalesUniversePair,
+    settings: dict,
+    save_params: bool = True,
+    use_saved_params: bool = True,
+    verbose: bool = False,
+    run_main: bool = True,
+    run_vacant: bool = True,
+    run_hedonic: bool = True,
+    run_ensemble: bool = True
+):
+   """
+   Tries out predictive models on the given SalesUniversePair. Optimized for speed and iteration, doesn't finalize
+   results or write anything to disk.
+
+   This function takes detailed instructions from the provided settings dictionary and handles all the internal details
+   like splitting the data, training the models, and saving the results. It performs basic statistic analysis on each
+   model, and optionally combines results into an ensemble model.
+
+   If "run_main" is true, it will run normal models as well as hedonic models (if the user so specifies), "hedonic" in
+   this context meaning models that attempt to generate a land value and an improvement value separately. If "run_vacant"
+   is true, it will run vacant models as well -- models that only use vacant models as evidence to generate land values.
+
+   This function delegates the model execution to :func:`openavmkit.benchmark.run_models` with the given settings.
+
+   :param sup: Sales and universe data.
+   :type sup: SalesUniversePair
+   :param settings: Configuration settings.
+   :type settings: dict
+   :param save_params: Whether to save model parameters.
+   :type save_params: bool, optional
+   :param use_saved_params: Whether to use saved model parameters.
+   :type use_saved_params: bool, optional
+   :param verbose: If True, enables verbose output.
+   :type verbose: bool, optional
+   :param run_main: Flag to run main models.
+   :type run_main: bool, optional
+   :param run_vacant: Flag to run vacant models.
+   :type run_vacant: bool, optional
+   :param run_hedonic: Flag to run hedonic models.
+   :type run_hedonic: bool, optional
+   :param run_ensemble: Flag to run ensemble models.
+   :type run_ensemble: bool, optional
+   """
+
+   openavmkit.benchmark.run_models(
+      sup,
+      settings,
+      save_params,
+      use_saved_params,
+      save_results=False,
+      verbose=verbose,
+      run_main=run_main,
+      run_vacant=run_vacant,
+      run_hedonic=run_hedonic,
+      run_ensemble=run_ensemble
+   )
+
+
+def finalize_models(
+    sup: SalesUniversePair,
+    settings: dict,
+    save_params: bool = True,
+    use_saved_params: bool = True,
+    verbose: bool = False
+):
+   """
+   Finalizes predictive models on the given SalesUniversePair. Generates final predictions and writes them to disk for
+   the rest of the pipeline to use.
+
+   This function takes detailed instructions from the provided settings dictionary and handles all the internal details
+   like splitting the data, training the models, and saving the results. It performs basic statistic analysis on each
+   model, and optionally combines results into an ensemble model.
+
+   If "run_main" is true, it will run normal models as well as hedonic models (if the user so specifies), "hedonic" in
+   this context meaning models that attempt to generate a land value and an improvement value separately. If "run_vacant"
+   is true, it will run vacant models as well -- models that only use vacant models as evidence to generate land values.
+
+   This function delegates the model execution to :func:`openavmkit.benchmark.run_models` with the given settings.
+
+   :param sup: Sales and universe data.
+   :type sup: SalesUniversePair
+   :param settings: Configuration settings.
+   :type settings: dict
+   :param save_params: Whether to save model parameters.
+   :type save_params: bool, optional
+   :param use_saved_params: Whether to use saved model parameters.
+   :type use_saved_params: bool, optional
+   :param verbose: If True, enables verbose output.
+   :type verbose: bool, optional
+   """
+
+   openavmkit.benchmark.run_models(
+      sup,
+      settings,
+      save_params,
+      use_saved_params,
+      save_results=True,
+      verbose=verbose,
+      run_main=True,
+      run_vacant=True,
+      run_hedonic=True,
+      run_ensemble=True
+   )
+
 def run_models(
     sup: SalesUniversePair,
     settings: dict,
     save_params: bool = True,
     use_saved_params: bool = True,
     save_results: bool = True,
-    use_saved_results: bool = True,
     verbose: bool = False,
     run_main: bool = True,
     run_vacant: bool = True,
@@ -774,8 +894,6 @@ def run_models(
    :type use_saved_params: bool, optional
    :param save_results: Whether to save model results.
    :type save_results: bool, optional
-   :param use_saved_results: Whether to use saved model results.
-   :type use_saved_results: bool, optional
    :param verbose: If True, enables verbose output.
    :type verbose: bool, optional
    :param run_main: Flag to run main models.
@@ -788,7 +906,7 @@ def run_models(
    :type run_ensemble: bool, optional
    :returns: FILL_IN_HERE: Describe the output.
    """
-   return openavmkit.benchmark.run_models(sup, settings, save_params, use_saved_params, save_results, use_saved_results, verbose, run_main, run_vacant, run_hedonic, run_ensemble)
+   return openavmkit.benchmark.run_models(sup, settings, save_params, use_saved_params, save_results, verbose, run_main, run_vacant, run_hedonic, run_ensemble)
 
 
 def finalize_land_values_sup(sup: SalesUniversePair, settings: dict, generate_boundaries: bool = False, verbose: bool = False):
