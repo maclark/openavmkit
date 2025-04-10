@@ -1702,6 +1702,9 @@ def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDa
             predicate="intersects"
         )
         
+        # Clean up any index_right column from the spatial join
+        parcels_within = parcels_within.drop(columns=["index_right"], errors="ignore")
+        
         # Only calculate distances for parcels within buffer
         if len(parcels_within) > 0:
             nearest = gpd.sjoin_nearest(
@@ -1709,7 +1712,13 @@ def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDa
                 gdf_projected,
                 how="left",
                 distance_col=f"dist_to_{_id}"
-            )[["key", f"dist_to_{_id}"]]
+            )
+            
+            # Clean up any index_right column from the spatial join
+            nearest = nearest.drop(columns=["index_right"], errors="ignore")
+            
+            # Keep only the columns we need
+            nearest = nearest[["key", f"dist_to_{_id}"]]
             
             nearest[f"dist_to_{_id}"] *= unit_factors[unit]
             
@@ -1733,7 +1742,13 @@ def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDa
             gdf_projected,
             how="left",
             distance_col=f"dist_to_{_id}"
-        )[["key", f"dist_to_{_id}"]]
+        )
+        
+        # Clean up any index_right column from the spatial join
+        nearest = nearest.drop(columns=["index_right"], errors="ignore")
+        
+        # Keep only the columns we need
+        nearest = nearest[["key", f"dist_to_{_id}"]]
         
         nearest[f"dist_to_{_id}"] *= unit_factors[unit]
         
@@ -1748,10 +1763,6 @@ def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDa
         # Add distance column
         distances_series = pd.Series(nearest.set_index("key")[f"dist_to_{_id}"])
         new_columns[f"dist_to_{_id}"] = distances_series.reindex(df_projected["key"]).values
-    
-    # Check for duplicates in input DataFrame
-    if df_in.duplicated(subset="key").sum() > 0:
-        raise ValueError("Found duplicate keys in the base dataframe, cannot perform distance calculations.")
     
     # Create new DataFrame with all new columns
     new_df = pd.DataFrame(new_columns, index=df_projected.index)
