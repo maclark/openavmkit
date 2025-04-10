@@ -7,6 +7,7 @@ from catboost import CatBoostRegressor
 from lightgbm import Booster
 from statsmodels.nonparametric.kernel_regression import KernelReg
 from xgboost import XGBRegressor
+from IPython.display import display
 
 from openavmkit.data import get_important_field, get_locations, _read_split_keys, SalesUniversePair, \
 	get_hydrated_sales_from_sup, get_report_locations, get_sales, get_sale_field
@@ -148,11 +149,13 @@ def try_variables(
 		bests = {}
 
 		if verbose:
-			print(f"--> for model group: {model_group}")
+			print("")
+			print(f"*** MODEL GROUP: {model_group} ***")
 
 		for vacant_only in [False, True]:
 			if verbose:
-				print(f"----> vacant_only: {vacant_only}")
+				print("")
+				print(f"--> vacant_only: {vacant_only}")
 
 			if vacant_only:
 				if df_in["vacant_sale"].sum() == 0:
@@ -221,7 +224,15 @@ def try_variables(
 					variables_used.append(var)
 				i += 1
 
-	worst_variables = [var for var in variables_to_use if var not in variables_used]
+	worst_variables = []
+	for var in variables_to_use:
+		found = False
+		for used_variable in variables_used:
+			if var == used_variable or f"{var}_" in used_variable:
+				found = True
+				break
+		if not found:
+			worst_variables.append(var)
 
 	print("")
 	print("************* WORST VARIABLES ***********")
@@ -299,12 +310,12 @@ def get_variable_recommendations(
 		df_sales = enrich_time_adjustment(df_sales, settings, verbose=verbose)
 
 	if verbose:
-		print("==> PREPARING")
+		print("------> PREPARING")
 	ds = _prepare_ds(df_sales, df_universe, model_group, vacant_only, settings, variables_to_use)
 	ds = ds.encode_categoricals_with_one_hot()
 
 	if verbose:
-		print("==> SPLITTING")
+		print("------> SPLITTING")
 	ds.split()
 
 	feature_selection = settings.get("modeling", {}).get("instructions", {}).get("feature_selection", {})
@@ -314,13 +325,13 @@ def get_variable_recommendations(
 	y_sales = ds.y_sales
 
 	if verbose:
-		print("==> CORRELATING")
+		print("------> CORRELATING")
 	# Correlation
 	X_corr = ds.df_sales[[ds.dep_var] + ds.ind_vars]
 	corr_results = calc_correlations(X_corr, thresh.get("correlation", 0.1))
 
 	if verbose:
-		print("==> ENR")
+		print("------> ENR")
 	# Elastic net regularization
 	try:
 		enr_coefs = calc_elastic_net_regularization(X_sales, y_sales, thresh.get("enr", 0.01))
@@ -333,30 +344,30 @@ def get_variable_recommendations(
 		raise e
 
 	if verbose:
-		print("==> R2")
+		print("------> R2")
 	# R² values
 	r2_values = calc_r2(ds.df_sales, ds.ind_vars, y_sales)
 
 	if verbose:
-		print("==> P VALUES")
+		print("------> P VALUES")
 	# P Values
 	p_values = calc_p_values_recursive_drop(X_sales, y_sales, thresh.get("p_value", 0.05))
 
 	if verbose:
-		print("==> T VALUES")
+		print("------> T VALUES")
 	# T Values
 	t_values = calc_t_values_recursive_drop(X_sales, y_sales, thresh.get("t_value", 2))
 
-	if verbose:
-		print("==> VIF")
 	# VIF
 	if skip_vif:
 		vif = None
 	else:
+		if verbose:
+			print("------> VIF")
 		vif = calc_vif_recursive_drop(X_sales, thresh.get("vif", 10))
 
 	if verbose:
-		print("==> CALC RECS")
+		print("------> CALC RECS")
 	# Generate final results & recommendations
 	df_results = _calc_variable_recommendations(
 		ds=ds,
@@ -370,12 +381,15 @@ def get_variable_recommendations(
 		report=report
 	)
 
+	if verbose:
+		display(df_results)
+
 	curr_variables = df_results["variable"].tolist()
 	best_variables = curr_variables.copy()
 	best_score = float('inf')
 
 	if verbose:
-		print("==> CROSS VALIDATING")
+		print("------> CROSS VALIDATING")
 	y = ds.y_sales
 	while len(curr_variables) > 0:
 		X = ds.df_sales[curr_variables]
@@ -388,11 +402,9 @@ def get_variable_recommendations(
 		curr_variables.remove(worst_variable)
 		# Remove the variable from the results dataframe.
 		df_results = df_results[df_results["variable"].ne(worst_variable)]
-		if verbose:
-			print(f"--> score: {cv_score:,.0f}  {len(curr_variables)} variables: {curr_variables}")
 
 	if verbose:
-		print("==> TABLE")
+		print("------> TABLE")
 	# Create a table from the list of best variables.
 	df_best = pd.DataFrame(best_variables, columns=["Variable"])
 	df_best["Rank"] = range(1, len(df_best) + 1)
@@ -408,7 +420,7 @@ def get_variable_recommendations(
 	report.set_var("summary_table", df_best.to_markdown())
 
 	if verbose:
-		print("==> REPORT")
+		print("------> REPORT")
 	report = generate_variable_report(report, settings, model_group, best_variables)
 
 	return {

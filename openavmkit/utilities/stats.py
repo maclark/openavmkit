@@ -550,8 +550,21 @@ def calc_p_values_recursive_drop(X: pd.DataFrame, y: pd.Series, sig_threshold: f
 			first_run = p_values
 		if max_p_value > sig_threshold:
 			var_to_drop = p_values.idxmax()
+			if var_to_drop == "const":
+				# don't pick const, pick the next variable to drop:
+				try:
+					var_to_drop = p_values.iloc[1:].idxmax()
+				except ValueError as e:
+					break
+			if pd.isna(var_to_drop):
+				break
 			X = X.drop(var_to_drop, axis=1)
-			model = sm.OLS(y, X).fit()
+			try:
+				new_model = sm.OLS(y, X).fit()
+			except ValueError as e:
+				print(f"Error fitting model after dropping {var_to_drop}: {e}")
+				break
+			model = new_model
 		else:
 			break
 
@@ -592,13 +605,26 @@ def calc_t_values_recursive_drop(X: pd.DataFrame, y: pd.Series, threshold: float
 	i = 0
 	while True:
 		i += 1
-		t_values = calc_t_values(X, y)
+		try:
+			t_values = calc_t_values(X, y)
+		except ValueError as e:
+			t_values = pd.Series([float('nan')] * X.shape[1], index=X.columns)
 		if first_run is None:
 			first_run = t_values
-		min_t_var = t_values.abs().idxmin()
+
+		if t_values.isna().all():
+			min_t_var = float('nan')
+		else:
+			min_t_var = t_values.abs().idxmin()
+
 		if pd.isna(min_t_var):
 			min_t_var = 0
-		min_t_val = t_values[min_t_var]
+
+		if len(t_values) > 0:
+			min_t_val = float('nan')
+		else:
+			min_t_val = t_values[min_t_var]
+
 		if min_t_val < threshold:
 			X = X.drop(min_t_var, axis=1)
 		else:
