@@ -702,6 +702,11 @@ def _enrich_df_openstreetmap(df: pd.DataFrame | gpd.GeoDataFrame, osm_settings: 
         pd.DataFrame | gpd.GeoDataFrame: DataFrame enriched with OpenStreetMap data
     """
     try:
+        if not osm_settings.get('enabled', False):
+            if verbose:
+                print("OpenStreetMap enrichment disabled, skipping all OSM features")
+            return df
+            
         if verbose:
             print("Enriching with OpenStreetMap data...")
             
@@ -840,18 +845,21 @@ def _enrich_df_openstreetmap(df: pd.DataFrame | gpd.GeoDataFrame, osm_settings: 
         
         # Configure distance calculations to match settings file format
         distances = []
+        
+        # Get the distances configuration from settings
+        distances_config = s_enrich_this.get('distances', [])
+        distances_by_id = {d.get('id'): d for d in distances_config if isinstance(d, dict)}
+        
         for feature_name in ['water_bodies', 'transportation', 'educational', 'parks', 'golf_courses']:
             if feature_name in dataframes:
-                # Add base feature for general distance
-                distances.append(feature_name)
+                # Add base feature with its settings from the config
+                if feature_name in distances_by_id:
+                    distances.append(distances_by_id[feature_name])
                 
                 # Add top features for individual distances if available
                 top_feature_name = f"{feature_name}_top"
-                if top_feature_name in dataframes:
-                    distances.append({
-                        "id": top_feature_name,
-                        "field": "name"
-                    })
+                if top_feature_name in dataframes and top_feature_name in distances_by_id:
+                    distances.append(distances_by_id[top_feature_name])
         
         # Add the distances configuration to the enrichment settings
         if distances:
@@ -1297,7 +1305,6 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
 
 	return gdf_merged
 
-
 def _enrich_polar_coordinates(gdf_in: gpd.GeoDataFrame, settings: dict, verbose: bool = False) -> gpd.GeoDataFrame:
 	gdf = gdf_in[["key", "geometry"]].copy()
 
@@ -1534,11 +1541,19 @@ def _perform_spatial_inference(df_in: gpd.GeoDataFrame, s_infer: dict, key: str,
 
 def _do_perform_spatial_inference(df_in: pd.DataFrame,  s_infer_entry: dict, field: str, key: str, verbose: bool = False):
 
+	print(f"\n=== Starting inference for field '{field}' ===")
+	print(f"Total rows in dataset: {len(df_in)}")
+	
 	if verbose:
 		print(f"Performing spatial inference on field {field}...")
 
 	filters = s_infer_entry.get("filters", None)
 	df = df_in.copy()
+	
+	# Count empty values before any processing
+	empty_before = df[field].isna().sum()
+	print(f"Empty values before inference: {empty_before} ({empty_before/len(df)*100:.1f}% of total)")
+	
 	df.loc[df[field].le(0), field] = None
 	if (filters is not None) and isinstance(filters, list):
 		if len(filters) > 0:
@@ -1546,7 +1561,7 @@ def _do_perform_spatial_inference(df_in: pd.DataFrame,  s_infer_entry: dict, fie
 	else:
 		warnings.warn("No 'filters' found in data.process.enrich.<target>.infer, scope will be global -- make sure this is what you really want")
 
-	print(f"--> selected {len(df)} rows to infer upon")
+	print(f"--> Selected {len(df)} rows to potentially infer upon")
 
 	proxies = s_infer_entry.get("proxies", [])
 	if not isinstance(proxies, list) or len(proxies) == 0:
@@ -1567,35 +1582,37 @@ def _do_perform_spatial_inference(df_in: pd.DataFrame,  s_infer_entry: dict, fie
 	if not isinstance(group_by, list) or len(group_by) == 0:
 		warnings.warn("No 'group_by' found in data.process.enrich.<target>.infer, scope will be global.")
 
-	print(f"--> proxies = {proxies}")
-	print(f"--> locations = {locations}")
-	print(f"--> group_by = {group_by}")
-
-	#pd.set_option('display.max_columns', None)
-	#from IPython.core.display import display
+	print(f"\nInference configuration:")
+	print(f"--> Proxies: {proxies}")
+	print(f"--> Locations: {locations}")
+	print(f"--> Group by: {group_by}")
 
 	proxy_fields = []
 	for proxy in proxies:
 		proxy_field = f"__proxy__{proxy}"
-		#display(df.columns.values)
 		df[proxy_field] = div_field_z_safe(df[field], df[proxy])
 		proxy_fields.append(proxy_field)
 
-		print(f"----> proxy {proxy_field}")
-		print(df[proxy_field].describe())
+		print(f"\nProxy statistics for {proxy_field}:")
+		stats = df[proxy_field].describe()
+		print(f"--> Count: {stats['count']:.0f}")
+		print(f"--> Mean: {stats['mean']:.2f}")
+		print(f"--> Std: {stats['std']:.2f}")
+		print(f"--> Min: {stats['min']:.2f}")
+		print(f"--> Max: {stats['max']:.2f}")
 
 	df["___proxy___"] = None
-
+	
+	print("\nProcessing by location:")
 	for location in locations:
+		print(f"\n--> Location: {location}")
+		empty_before_location = df[field].isna().sum()
 
-		group_list = group_by.copy()
-
+		group_list = group_by.copy() if group_by else []
 		group_list.append(location)
 
 		df_group = df.groupby(group_list)
 		df_agg = df_group[proxy_fields].agg("median").reset_index()
-
-		print(f"----> location {location}")
 
 		group_list_key = "_".join(group_list)
 		df_agg[group_list_key] = df_agg[group_list].apply(lambda x: "_".join(x.astype(str)), axis=1)
@@ -1605,17 +1622,28 @@ def _do_perform_spatial_inference(df_in: pd.DataFrame,  s_infer_entry: dict, fie
 		for proxy in proxies:
 			proxy_field = f"__proxy__{proxy}"
 			df = merge_and_stomp_dfs(df, df_agg, on=group_list_key)
-			# Calculate the proxy value (e.g. building size) from the proxy field (e.g. building size per footprint unit) and the proxy (e.g. footprint unit)
+			# Calculate the proxy value from the proxy field and the proxy
 			df.loc[df["___proxy___"].isna(), "___proxy___"] = df[proxy_field] * df[proxy]
+
+		empty_after_location = df[field].isna().sum()
+		filled_this_location = empty_before_location - empty_after_location
+		if filled_this_location > 0:
+			print(f"    Filled {filled_this_location} values using {location} grouping")
+			print(f"    ({filled_this_location/empty_before*100:.1f}% of original empty values)")
 
 		df = df.drop(columns=[group_list_key], errors="ignore")
 
 	empty_index = df[field].isna()
 
-	if verbose:
-		empty_values = len(df[df[field].isna()])
-		proxy_values = len(df[df[field].isna() & ~df["___proxy___"].isna()])
-		print(f"--> {empty_values} empty values in {field} were filled with {proxy_values} proxy-estimated values")
+	# Final statistics
+	empty_values = df[field].isna().sum()
+	proxy_values = df[df[field].isna() & ~df["___proxy___"].isna()].shape[0]
+	total_filled = empty_before - empty_values
+	
+	print(f"\nFinal inference results for {field}:")
+	print(f"--> Started with {empty_before} empty values")
+	print(f"--> Filled {total_filled} values ({total_filled/empty_before*100:.1f}% of empty values)")
+	print(f"--> {empty_values} values remain empty ({empty_values/len(df)*100:.1f}% of total)")
 
 	df.loc[df[field].isna(), field] = df["___proxy___"]
 	df = df.drop(columns=["___proxy___", "___everything___"], errors="ignore")
@@ -1674,6 +1702,9 @@ def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDa
             predicate="intersects"
         )
         
+        # Clean up any index_right column from the spatial join
+        parcels_within = parcels_within.drop(columns=["index_right"], errors="ignore")
+        
         # Only calculate distances for parcels within buffer
         if len(parcels_within) > 0:
             nearest = gpd.sjoin_nearest(
@@ -1681,7 +1712,13 @@ def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDa
                 gdf_projected,
                 how="left",
                 distance_col=f"dist_to_{_id}"
-            )[["key", f"dist_to_{_id}"]]
+            )
+            
+            # Clean up any index_right column from the spatial join
+            nearest = nearest.drop(columns=["index_right"], errors="ignore")
+            
+            # Keep only the columns we need
+            nearest = nearest[["key", f"dist_to_{_id}"]]
             
             nearest[f"dist_to_{_id}"] *= unit_factors[unit]
             
@@ -1705,7 +1742,13 @@ def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDa
             gdf_projected,
             how="left",
             distance_col=f"dist_to_{_id}"
-        )[["key", f"dist_to_{_id}"]]
+        )
+        
+        # Clean up any index_right column from the spatial join
+        nearest = nearest.drop(columns=["index_right"], errors="ignore")
+        
+        # Keep only the columns we need
+        nearest = nearest[["key", f"dist_to_{_id}"]]
         
         nearest[f"dist_to_{_id}"] *= unit_factors[unit]
         
@@ -1720,10 +1763,6 @@ def _do_perform_distance_calculations(df_in: gpd.GeoDataFrame, gdf_in: gpd.GeoDa
         # Add distance column
         distances_series = pd.Series(nearest.set_index("key")[f"dist_to_{_id}"])
         new_columns[f"dist_to_{_id}"] = distances_series.reindex(df_projected["key"]).values
-    
-    # Check for duplicates in input DataFrame
-    if df_in.duplicated(subset="key").sum() > 0:
-        raise ValueError("Found duplicate keys in the base dataframe, cannot perform distance calculations.")
     
     # Create new DataFrame with all new columns
     new_df = pd.DataFrame(new_columns, index=df_projected.index)
@@ -1772,7 +1811,9 @@ def _perform_distance_calculations(df_in: gpd.GeoDataFrame, s_dist: dict, datafr
         if _id is None:
             raise ValueError("No 'id' found in distance entry.")
         if _id not in dataframes:
-            raise ValueError(f"Distance table '{_id}' not found in dataframes.")
+            if verbose:
+                print(f"--> Skipping {_id} - not found in dataframes (likely disabled in settings)")
+            continue
             
         gdf = dataframes[_id]
         field = entry.get("field", None)
@@ -2604,3 +2645,4 @@ def _assign_modal_model_group_to_common_area(df_univ_in: gpd.GeoDataFrame, model
 	df_return = combine_dfs(df_return, df[["key", "model_group"]], df2_stomps=True, index="key")
 	df_return.to_parquet("out/look/common_area-3-return.parquet")
 	return df_return
+
