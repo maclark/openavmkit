@@ -1,13 +1,13 @@
-import os
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Tuple
 import pandas as pd
 import geopandas as gpd
-import requests
 import numpy as np
-from shapely.geometry import Point, Polygon, LineString, MultiPolygon, box
-import json
+from shapely.geometry import box
 import osmnx as ox
-from openavmkit.utilities.geometry import distance_km, get_crs, stamp_geo_field_onto_df
+
+from openavmkit.utilities.cache import check_cache, read_cache, write_cache
+from openavmkit.utilities.data import clean_series
+
 
 class OpenStreetMapService:
     """
@@ -54,7 +54,7 @@ class OpenStreetMapService:
         hemisphere = 'north' if centroid_lat >= 0 else 'south'
         return f"+proj=utm +zone={utm_zone} +{hemisphere} +datum=WGS84 +units=m +no_defs"
 
-    def get_water_bodies(self, bbox: Tuple[float, float, float, float], settings: dict) -> gpd.GeoDataFrame:
+    def get_water_bodies(self, bbox: Tuple[float, float, float, float], settings: dict, use_cache: bool = True) -> gpd.GeoDataFrame:
         """
         Get water bodies (rivers, lakes, etc.) from OpenStreetMap.
         Stores both all water bodies and top N largest ones for distance calculations.
@@ -62,12 +62,19 @@ class OpenStreetMapService:
         Args:
             bbox (Tuple[float, float, float, float]): Bounding box (min_lon, min_lat, max_lon, max_lat)
             settings (dict): Settings for water bodies including min_area and top_n
+            use_cache (bool): Whether to use cached data (default: True)
             
         Returns:
             gpd.GeoDataFrame: GeoDataFrame containing all water bodies
         """
         if not settings.get('enabled', False):
             return gpd.GeoDataFrame()
+
+        # check if we have already cached this data, AND the settings are the same
+        if use_cache and check_cache("osm/water_bodies", signature=settings, filetype="gdf"):
+            print("----> using cached water bodies")
+            # if so return the cached version
+            return read_cache("osm/water_bodies", "gdf")
         
         min_area = settings.get('min_area', 10000)
         top_n = settings.get('top_n', 5)
@@ -108,6 +115,7 @@ class OpenStreetMapService:
             # Clean up names
             water_bodies_filtered['name'] = water_bodies_filtered['name'].fillna('unnamed_water_body')
             water_bodies_filtered['name'] = water_bodies_filtered['name'].str.lower().str.replace(' ', '_')
+            water_bodies_filtered['name'] = clean_series(water_bodies_filtered['name'])
             
             # Create a copy for top N features
             water_bodies_top = water_bodies_filtered.nlargest(top_n, 'area').copy()
@@ -115,7 +123,10 @@ class OpenStreetMapService:
             # Store both dataframes
             self.features['water_bodies'] = water_bodies_filtered
             self.features['water_bodies_top'] = water_bodies_top
-            
+
+            # write to cache so we can skip on next run
+            write_cache("osm/water_bodies", water_bodies_filtered, settings,"gdf")
+
             return water_bodies_filtered
             
         except Exception as e:
@@ -124,7 +135,7 @@ class OpenStreetMapService:
             print(f"Traceback: {traceback.format_exc()}")
             return gpd.GeoDataFrame()
 
-    def get_transportation(self, bbox: Tuple[float, float, float, float], settings: dict) -> gpd.GeoDataFrame:
+    def get_transportation(self, bbox: Tuple[float, float, float, float], settings: dict, use_cache: bool = True) -> gpd.GeoDataFrame:
         """
         Get major transportation networks (roads, railways) from OpenStreetMap.
         Stores both all routes and top N longest ones for distance calculations.
@@ -132,12 +143,19 @@ class OpenStreetMapService:
         Args:
             bbox (Tuple[float, float, float, float]): Bounding box (min_lon, min_lat, max_lon, max_lat)
             settings (dict): Settings for transportation including min_length and top_n
+            use_cache (bool): Whether to use cached data (default: True)
             
         Returns:
             gpd.GeoDataFrame: GeoDataFrame containing all transportation routes
         """
         if not settings.get('enabled', False):
             return gpd.GeoDataFrame()
+
+        # check if we have already cached this data, AND the settings are the same
+        if use_cache and check_cache("osm/transportation", signature=settings, filetype="gdf"):
+            print("----> using cached transportation")
+            # if so return the cached version
+            return read_cache("osm/transportation", "gdf")
             
         min_length = settings.get('min_length', 1000)
         top_n = settings.get('top_n', 5)
@@ -179,6 +197,7 @@ class OpenStreetMapService:
         # Clean up names
         transportation_filtered['name'] = transportation_filtered['name'].fillna('unnamed_route')
         transportation_filtered['name'] = transportation_filtered['name'].str.lower().str.replace(' ', '_')
+        transportation_filtered['name'] = clean_series(transportation_filtered['name'])
         
         # Create a copy for top N features
         transportation_top = transportation_filtered.nlargest(top_n, 'length').copy()
@@ -186,9 +205,13 @@ class OpenStreetMapService:
         # Store both dataframes
         self.features['transportation'] = transportation_filtered
         self.features['transportation_top'] = transportation_top
-        
+
+        # write to cache so we can skip on next run
+        write_cache("osm/transportation", transportation_filtered, settings,"gdf")
+
         return transportation_filtered
-    
+
+
     def get_elevation_data(self, bbox: Tuple[float, float, float, float], resolution: int = 30) -> np.ndarray:
         """
         Get digital elevation model (DEM) data from USGS.
@@ -215,8 +238,9 @@ class OpenStreetMapService:
         elevation = 100 + 50 * np.sin(lon_grid * 10) + 50 * np.cos(lat_grid * 10)
         
         return elevation, (lon_range, lat_range)
-    
-    def get_educational_institutions(self, bbox: Tuple[float, float, float, float], settings: dict) -> gpd.GeoDataFrame:
+
+
+    def get_educational_institutions(self, bbox: Tuple[float, float, float, float], settings: dict, use_cache: bool = True) -> gpd.GeoDataFrame:
         """
         Get educational institutions from OpenStreetMap.
         Stores both all institutions and top N largest ones for distance calculations.
@@ -224,12 +248,19 @@ class OpenStreetMapService:
         Args:
             bbox (Tuple[float, float, float, float]): Bounding box (min_lon, min_lat, max_lon, max_lat)
             settings (dict): Settings for educational institutions including min_area and top_n
+            use_cache (bool): Whether to use cached data (default: True)
             
         Returns:
             gpd.GeoDataFrame: GeoDataFrame containing all educational institutions
         """
         if not settings.get('enabled', False):
             return gpd.GeoDataFrame()
+
+        # check if we have already cached this data, AND the settings are the same
+        if use_cache and check_cache("osm/educational_institutions", signature=settings, filetype="gdf"):
+            print("----> using cached educational institutions")
+            # if so return the cached version
+            return read_cache("osm/educational_institutions", "gdf")
             
         min_area = settings.get('min_area', 1000)
         top_n = settings.get('top_n', 5)
@@ -283,6 +314,7 @@ class OpenStreetMapService:
             
             # Clean up names
             institutions_filtered['name'] = institutions_filtered['name'].str.lower().str.replace(' ', '_')
+            institutions_filtered['name'] = clean_series(institutions_filtered['name'])
             
             # Create a copy for top N features
             institutions_top = institutions_filtered.nlargest(top_n, 'area').copy()
@@ -290,7 +322,10 @@ class OpenStreetMapService:
             # Store both dataframes
             self.features['educational'] = institutions_filtered
             self.features['educational_top'] = institutions_top
-            
+
+            # write to cache so we can skip on next run
+            write_cache("osm/educational_institutions", institutions_filtered, settings,"gdf")
+
             return institutions_filtered
             
         except Exception as e:
@@ -299,8 +334,9 @@ class OpenStreetMapService:
             import traceback
             print(f"Traceback: {traceback.format_exc()}")
             return gpd.GeoDataFrame()
-    
-    def get_parks(self, bbox: Tuple[float, float, float, float], settings: dict) -> gpd.GeoDataFrame:
+
+
+    def get_parks(self, bbox: Tuple[float, float, float, float], settings: dict, use_cache: bool = True) -> gpd.GeoDataFrame:
         """
         Get parks from OpenStreetMap.
         Stores both all parks and top N largest ones for distance calculations.
@@ -308,12 +344,19 @@ class OpenStreetMapService:
         Args:
             bbox (Tuple[float, float, float, float]): Bounding box (min_lon, min_lat, max_lon, max_lat)
             settings (dict): Settings for parks including min_area and top_n
+            use_cache (bool): Whether to use cached data (default: True)
             
         Returns:
             gpd.GeoDataFrame: GeoDataFrame containing all parks
         """
         if not settings.get('enabled', False):
             return gpd.GeoDataFrame()
+
+        # check if we have already cached this data, AND the settings are the same
+        if use_cache and check_cache("osm/parks", signature=settings, filetype="gdf"):
+            print("----> using cached parks")
+            # if so return the cached version
+            return read_cache("osm/parks", "gdf")
             
         min_area = settings.get('min_area', 1000)
         top_n = settings.get('top_n', 5)
@@ -353,6 +396,7 @@ class OpenStreetMapService:
         # Clean up names
         parks_filtered['name'] = parks_filtered['name'].fillna('unnamed_park')
         parks_filtered['name'] = parks_filtered['name'].str.lower().str.replace(' ', '_')
+        parks_filtered['name'] = clean_series(parks_filtered['name'])
         
         # Create a copy for top N features
         parks_top = parks_filtered.nlargest(top_n, 'area').copy()
@@ -360,10 +404,14 @@ class OpenStreetMapService:
         # Store both dataframes
         self.features['parks'] = parks_filtered
         self.features['parks_top'] = parks_top
-        
+
+        # write to cache so we can skip on next run
+        write_cache("osm/parks", parks_filtered, settings,"gdf")
+
         return parks_filtered
-    
-    def get_golf_courses(self, bbox: Tuple[float, float, float, float], settings: dict) -> gpd.GeoDataFrame:
+
+
+    def get_golf_courses(self, bbox: Tuple[float, float, float, float], settings: dict, use_cache: bool = True) -> gpd.GeoDataFrame:
         """
         Get golf courses from OpenStreetMap.
         Stores both all golf courses and top N largest ones for distance calculations.
@@ -377,6 +425,12 @@ class OpenStreetMapService:
         """
         if not settings.get('enabled', False):
             return gpd.GeoDataFrame()
+
+        # check if we have already cached this data, AND the settings are the same
+        if use_cache and check_cache("osm/golf_courses", signature=settings, filetype="gdf"):
+            print("----> using cached golf courses")
+            # if so return the cached version
+            return read_cache("osm/golf_courses", "gdf")
             
         min_area = settings.get('min_area', 10000)
         top_n = settings.get('top_n', 3)
@@ -415,6 +469,7 @@ class OpenStreetMapService:
         # Clean up names
         golf_courses_filtered['name'] = golf_courses_filtered['name'].fillna('unnamed_golf_course')
         golf_courses_filtered['name'] = golf_courses_filtered['name'].str.lower().str.replace(' ', '_')
+        golf_courses_filtered['name'] = clean_series(golf_courses_filtered['name'])
         
         # Create a copy for top N features
         golf_courses_top = golf_courses_filtered.nlargest(top_n, 'area').copy()
@@ -422,7 +477,10 @@ class OpenStreetMapService:
         # Store both dataframes
         self.features['golf_courses'] = golf_courses_filtered
         self.features['golf_courses_top'] = golf_courses_top
-        
+
+        # write to cache so we can skip on next run
+        write_cache("osm/golf_courses", golf_courses_filtered, settings,"gdf")
+
         return golf_courses_filtered
     
     def calculate_elevation_stats(self, gdf: gpd.GeoDataFrame, elevation_data: np.ndarray, 
@@ -438,6 +496,7 @@ class OpenStreetMapService:
         Returns:
             pd.DataFrame: DataFrame containing elevation statistics
         """
+
         lon_range, lat_range = lon_lat_ranges
         
         # Initialize arrays for elevation statistics
@@ -493,6 +552,18 @@ class OpenStreetMapService:
         Returns:
             pd.DataFrame: DataFrame with distances
         """
+
+        # check if we have already cached this data, AND the settings are the same
+        # construct a unique signature:
+        signature = {
+            'feature_type': feature_type,
+            'features': hash(features.to_json())
+        }
+        if check_cache(f"osm/{feature_type}_distances", signature=signature, filetype="df"):
+            print("----> using cached distances")
+            # if so return the cached version
+            return read_cache(f"osm/{feature_type}_distances", "df")
+
         # Project to UTM for accurate distance calculation
         utm_crs = self._get_utm_crs(gdf.total_bounds)
         gdf_proj = gdf.to_crs(utm_crs)
@@ -517,7 +588,10 @@ class OpenStreetMapService:
                 distance_data[f'dist_to_{feature_type}_{feature_name}'] = gdf_proj.geometry.apply(
                     lambda g: feature_proj.distance(g)
                 )
-        
+
+        # write to cache so we can skip on next run
+        write_cache(f"osm/{feature_type}_distances", signature, distance_data, "df")
+
         # Create DataFrame from all collected distances at once
         return pd.DataFrame(distance_data, index=gdf.index)
 
