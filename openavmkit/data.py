@@ -28,6 +28,7 @@ from openavmkit.utilities.settings import get_fields_categorical, get_fields_imp
 from openavmkit.utilities.census import get_creds_from_env_census, init_service_census, match_to_census_blockgroups
 from openavmkit.utilities.census import CensusService
 from openavmkit.utilities.openstreetmap import init_service_openstreetmap
+from openavmkit.utilities.overture import init_service_overture
 from openavmkit.inference import get_inference_model, perform_spatial_inference
 
 @dataclass
@@ -1305,11 +1306,11 @@ def _enrich_vacant(df_in: pd.DataFrame, settings:dict) -> pd.DataFrame:
 
 def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: dict[str, pd.DataFrame], settings: dict, verbose: bool = False) -> gpd.GeoDataFrame:
   """
-  Enrich a DataFrame with spatial information using spatial joins and distance calculations.
+  Perform basic geometric enrichment on a DataFrame by adding spatial features.
 
   :param df_in: Input DataFrame.
   :type df_in: pandas.DataFrame
-  :param s_enrich_this: Enrichment instructions for geometry.
+  :param s_enrich_this: Enrichment instructions.
   :type s_enrich_this: dict
   :param dataframes: Dictionary of additional DataFrames.
   :type dataframes: dict[str, pd.DataFrame]
@@ -1317,18 +1318,42 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
   :type settings: dict
   :param verbose: If True, prints progress.
   :type verbose: bool, optional
-  :returns: A GeoDataFrame enriched with spatial information.
+  :returns: GeoDataFrame with enriched spatial features.
   :rtype: geopandas.GeoDataFrame
   """
   df = df_in.copy()
   s_geom = s_enrich_this.get("geometry", [])
   s_dist = s_enrich_this.get("distances", {})
   s_infer = s_enrich_this.get("infer", {})
+  s_overture = s_enrich_this.get("overture", {})
 
   gdf: gpd.GeoDataFrame
 
   # geometry
   gdf = _perform_spatial_joins(s_geom, dataframes, verbose=verbose)
+
+  # Enrich with Overture building data if enabled
+  if s_overture.get("enabled", False):
+    if verbose:
+      print("Enriching with Overture building data...")
+    
+    # Initialize Overture service with the correct settings path
+    overture_settings = {
+      "overture": s_overture  # Pass the overture settings directly
+    }
+    overture_service = init_service_overture(overture_settings)
+    
+    # Get bounding box from data
+    bbox = gdf.to_crs("EPSG:4326").total_bounds
+    
+    # Fetch building data
+    buildings = overture_service.get_buildings(bbox, use_cache=s_overture.get("cache", True), verbose=verbose)
+    
+    if not buildings.empty:
+      # Calculate building footprints
+      gdf = overture_service.calculate_building_footprints(gdf, buildings, verbose=verbose)
+    elif verbose:
+      print("--> No buildings found in the area")
 
   # distances
   gdf = _perform_distance_calculations(gdf, s_dist, dataframes, get_long_distance_unit(settings), verbose=verbose)
@@ -1351,7 +1376,6 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
       break
   if not success:
     raise ValueError(f"Could not find a common key between geo_parcels and base dataframe. Tried keys: {try_keys}")
-  #gdf_merged = _basic_geo_enrichment(gdf_merged, settings, verbose=verbose)
 
   # spatially infer missing
   gdf_merged = perform_spatial_inference(gdf_merged, s_infer, "key", verbose=verbose)

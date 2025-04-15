@@ -929,7 +929,7 @@ def get_inference_model(model_type: str) -> InferenceModel:
     """Factory function to get inference model by type"""
     models = {
         'ratio_proxy': RatioProxyModel,
-        'smart_ols': SmartOLSModel,
+        #'smart_ols': SmartOLSModel,
         'random_forest': RandomForestModel,
         'lightgbm': LightGBMModel,
         'xgboost': XGBoostModel,
@@ -1100,7 +1100,7 @@ def _do_perform_spatial_inference(df: pd.DataFrame, s_infer: dict, field: str, k
     # Run experiments if enabled
     if model_settings.get("experiment", False):
         print("\n=== Running Model Experiments ===")
-        experiment_models = ['ratio_proxy', 'smart_ols', 'random_forest', 'lightgbm', 'xgboost', 'ensemble']
+        experiment_models = [ 'random_forest', 'lightgbm', 'xgboost', 'ensemble']
         best_score = float('-inf')
         best_model_type = None
         validation_results = {}
