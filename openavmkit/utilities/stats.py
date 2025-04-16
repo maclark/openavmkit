@@ -13,7 +13,6 @@ from matplotlib import pyplot as plt
 from sklearn.linear_model import ElasticNet, LinearRegression
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-matplotlib.use('Agg')
 
 
 def calc_chds(df_in: pd.DataFrame, field_cluster: str, field_value: str):

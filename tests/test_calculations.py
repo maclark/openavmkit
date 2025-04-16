@@ -33,6 +33,7 @@ def test_calculations_math():
 
   assert dfs_are_equal(df_results, df_expected)
 
+
 def test_calculations_math_2():
   data = {
     "a": [3.14, 1.5, 1.49, 1.51, 10.1, 10.25, 10.51, 10.5, -43.8, 99.9]
@@ -123,6 +124,28 @@ def test_calculations_txt():
   df_expected = pd.DataFrame(data=expected)
   df_results = perform_calculations(df, calc)
 
+  assert dfs_are_equal(df_results, df_expected)
+
+
+def test_calculations_filter2():
+  data = {
+    "bldg_area_finished_sqft": [100, 100, 100, 100, 100, 100, 100, 100],
+    "osm_bldg_area_footprint_sqft": [0, 0, None, float('nan'), 0, 10, 10, 10]
+  }
+  df = pd.DataFrame(data=data)
+  calc = {
+    "bldg_area_finished_sqft": [
+      "*", "bldg_area_finished_sqft", [
+        "?", ["not", ["iszeroempty", "osm_bldg_area_footprint_sqft"]]
+      ]
+    ]
+  }
+  expected = {
+    "bldg_area_finished_sqft": [0, 0, 0, 0, 0, 100, 100, 100],
+    "osm_bldg_area_footprint_sqft": [0, 0, None, float('nan'), 0, 10, 10, 10],
+  }
+  df_expected = pd.DataFrame(data=expected)
+  df_results = perform_calculations(df, calc)
   assert dfs_are_equal(df_results, df_expected)
 
 

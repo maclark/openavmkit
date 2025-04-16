@@ -5,6 +5,7 @@ import pandas as pd
 
 from openavmkit.filters import resolve_filter
 from openavmkit.utilities.data import div_field_z_safe
+from openavmkit.utilities.geometry import get_crs
 
 
 def perform_calculations(df_in: pd.DataFrame, calc: dict):
@@ -102,7 +103,6 @@ def _do_calc(df_in: pd.DataFrame, entry: list, i:int=0):
     lhs = entry[1]
     lhs, i = _calc_resolve(df, value=lhs, i=i)
 
-
   if op == "asint":
     return (lhs.astype("Float64")).astype("Int64")
   elif op == "asfloat":
@@ -193,7 +193,38 @@ def _do_calc(df_in: pd.DataFrame, entry: list, i:int=0):
       else:
         return lhs.astype(str).str[:b]
     raise ValueError(f"Right-hand side value for operator 'substr' must be a dict containing 'left' and/or 'right' keys, found '{type(rhs)}' = {rhs}")
-    #return lhs.astype(str).str[-rhs:]
+  elif op == "geo_area":
+    if "geometry" in df_in:
+      ea_crs = get_crs(df_in, "equal_area")
+      df_ea = df_in.to_crs(ea_crs)
+      # this will be in square meters
+      series_area = df_ea.geometry.area
+      if lhs == "sqft":
+        return series_area * 10.7639
+      elif lhs == "sqm":
+        return series_area
+      elif lhs == "acres":
+        return (series_area * 10.7639) / 43560
+      elif lhs == "sqkm":
+        return series_area / 1e6
+      elif lhs == "hectares":
+        return series_area / 10000
+      else:
+        raise ValueError(f"Unknown area unit: {lhs}. Only 'sqft', 'sqm', 'acres', 'sqkm', 'hectares' are supported.")
+    else:
+      raise ValueError("'area' calculation can only be performed on a geodataframe containing a 'geometry' column!")
+  elif op == "geo_latitude" or op == "geo_longitude":
+    lat_or_lon = "latitude" if op == "geo_latitude" else "longitude"
+    if "geometry" not in df_in:
+      raise ValueError("'geo_latitude' and 'geo_longitude' calculations can only be performed on a geodataframe containing a 'geometry' column!")
+    latlon_crs = get_crs(df_in, "latlon")
+    df_latlon = df_in.to_crs(latlon_crs)
+    if lat_or_lon == "latitude":
+      # return latitude of geometry centroid:
+      return df_latlon.geometry.centroid.y
+    elif lat_or_lon == "longitude":
+      # return longitude of geometry centroid:
+      return df_latlon.geometry.centroid.x
 
 
   raise ValueError(f"Unknown operation: {op}")

@@ -16,6 +16,30 @@ def select_filter(df: pd.DataFrame, f: list) -> pd.DataFrame:
   return df.loc[resolved_index]
 
 
+def resolve_not_filter(df: pd.DataFrame, f: list) -> pd.Series:
+  """
+  Resolve a NOT filter.
+
+  The first element of the filter list must be "not", followed by a filter list.
+
+  :param df: Input DataFrame.
+  :type df: pandas.DataFrame
+  :param f: Filter list.
+  :type f: list
+  :returns: Boolean Series resulting from applying the NOT operator.
+  :rtype: pandas.Series
+  """
+  if len(f) < 2:
+    raise ValueError("NOT operator requires at least one argument")
+
+  values = f[1:]
+  if len(values) > 1:
+    raise ValueError(f"NOT operator only accepts one argument")
+
+  selected_index = resolve_filter(df, values[0])
+  return ~selected_index
+
+
 def resolve_bool_filter(df: pd.DataFrame, f: list) -> pd.Series:
   """
   Resolve a list of filters using a boolean operator.
@@ -80,7 +104,9 @@ def resolve_filter(df: pd.DataFrame, f: list) -> pd.Series:
   operator = f[0]
 
   # check if operator is a boolean operator:
-  if _is_bool_operator(operator):
+  if operator == "not":
+    return resolve_not_filter(df, f)
+  elif _is_bool_operator(operator):
     return resolve_bool_filter(df, f)
   else:
     field = f[1]
@@ -103,6 +129,7 @@ def resolve_filter(df: pd.DataFrame, f: list) -> pd.Series:
     if operator == "notin": return ~df[field].isin(value)
     if operator == "isempty": return pd.isna(df[field]) | df[field].astype(str).str.strip().eq("")
     if operator == "iszero": return df[field].eq(0)
+    if operator == "iszeroempty": return df[field].eq(0) | pd.isna(df[field]) | df[field].astype(str).str.strip().eq("")
     if operator == "contains":
       if isinstance(value, str):
         selection = df[field].str.contains(value)
