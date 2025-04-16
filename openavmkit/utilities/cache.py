@@ -98,7 +98,8 @@ def write_cached_df(
     df_orig: pd.DataFrame,
     df_new: pd.DataFrame,
     filename: str,
-    key: str = "key"
+    key: str = "key",
+    extra_signature: dict | str = None
 )-> bool:
 
   new_cols = [col for col in df_new.columns if col not in df_orig.columns]
@@ -107,7 +108,7 @@ def write_cached_df(
 
   df_diff = df_new[[key]+new_cols].copy()
 
-  signature = _get_df_signature(df_orig)
+  signature = _get_df_signature(df_orig, extra_signature)
 
   df_type = "df"
 
@@ -117,9 +118,10 @@ def write_cached_df(
 def get_cached_df(
     df: pd.DataFrame,
     filename: str,
-    key: str = "key"
+    key: str = "key",
+    extra_signature: dict | str = None
 )->pd.DataFrame | gpd.GeoDataFrame | None:
-  signature = _get_df_signature(df)
+  signature = _get_df_signature(df, extra_signature)
 
   if check_cache(filename, signature, "df"):
     df_cache = read_cache(filename, "df")
@@ -129,30 +131,36 @@ def get_cached_df(
   return None
 
 
-def _get_df_signature(df: pd.DataFrame):
-  return {
-    "rows": len(df),
-    "columns": len(df.columns),
+def _get_df_signature(df: pd.DataFrame, extra: dict | str = None):
+  sorted_columns = sorted(df.columns)
+  signature = {
+    "num_rows": len(df),
+    "num_columns": len(df.columns),
+    "columns": sorted_columns,
     "checksum": _cheap_checksum(df)
   }
+  if extra is not None:
+    signature["extra"] = extra
+  return signature
 
 
 def _cheap_checksum(df: pd.DataFrame):
   checksum = {}
-  for col in df.columns:
-    # if it's geometry:
-    # if it's numeric:
-    if pd.api.types.is_numeric_dtype(df[col]):
-      checksum[col] = float(df[col].sum())
-    elif col == "geometry":
-      # just note how many geometry rows are not null:
-      checksum[col] = float((~df[col].isna()).sum())
-    else:
-      try:
-        checksum[col] = str(df[col].value_counts())
-      except TypeError:
-        checksum[col] = float(df[col].apply(lambda x: str(x).encode("utf-8")).sum())
   return checksum
+  # for col in df.columns:
+  #   # if it's geometry:
+  #   # if it's numeric:
+  #   if pd.api.types.is_numeric_dtype(df[col]):
+  #     checksum[col] = float(df[col].sum())
+  #   elif col == "geometry":
+  #     # just note how many geometry rows are not null:
+  #     checksum[col] = float((~df[col].isna()).sum())
+  #   else:
+  #     try:
+  #       checksum[col] = str(df[col].value_counts())
+  #     except TypeError:
+  #       checksum[col] = float(df[col].apply(lambda x: str(x).encode("utf-8")).sum())
+  # return checksum
 
 def _match_signature(
     filename: str,

@@ -628,7 +628,7 @@ def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str, pd
 
   return sup
 
-def _enrich_df_census(df: pd.DataFrame | gpd.GeoDataFrame, census_settings: dict, verbose: bool = False) -> pd.DataFrame | gpd.GeoDataFrame:
+def _enrich_df_census(df_in: pd.DataFrame | gpd.GeoDataFrame, census_settings: dict, verbose: bool = False) -> pd.DataFrame | gpd.GeoDataFrame:
   """
   Enrich a DataFrame with Census data by performing a spatial join with Census block groups.
 
@@ -642,7 +642,11 @@ def _enrich_df_census(df: pd.DataFrame | gpd.GeoDataFrame, census_settings: dict
   :rtype: pd.DataFrame | gpd.GeoDataFrame
   """
   if not census_settings.get("enabled", False):
-    return df
+    return df_in
+
+  df_out = get_cached_df(df_in, "census", "key")
+
+  df = df_in.copy()
 
   try:
     # Get Census credentials and initialize service
@@ -1426,7 +1430,7 @@ def _enrich_polar_coordinates(gdf_in: gpd.GeoDataFrame, settings: dict, verbose:
   return gdf_result
 
 
-def _basic_geo_enrichment(gdf: gpd.GeoDataFrame, settings: dict, verbose: bool = False) -> gpd.GeoDataFrame:
+def _basic_geo_enrichment(gdf_in: gpd.GeoDataFrame, settings: dict, verbose: bool = False) -> gpd.GeoDataFrame:
   """
   Perform basic geometric enrichment on a GeoDataFrame by adding spatial features.
 
@@ -1446,6 +1450,14 @@ def _basic_geo_enrichment(gdf: gpd.GeoDataFrame, settings: dict, verbose: bool =
 
   if verbose:
     print(f"Performing basic geometric enrichment...")
+  gdf_out = get_cached_df(gdf_in, "geom/basic", "key")
+  if gdf_out is not None:
+    if verbose:
+      print("-->found cached data...")
+    return gdf_out
+
+  gdf = gdf_in.copy()
+
   t.start("latlon")
   gdf_latlon = gdf.to_crs(get_crs(gdf, "latlon"))
   gdf_area = gdf.to_crs(get_crs(gdf, "equal_area"))
@@ -1480,6 +1492,9 @@ def _basic_geo_enrichment(gdf: gpd.GeoDataFrame, settings: dict, verbose: bool =
   if verbose:
     _t = t.get("polar")
     print(f"--> calculated polar coordinates...({_t:.2f}s)")
+
+  write_cached_df(gdf_in, gdf, "geom/basic", "key")
+
   return gdf
 
 
@@ -1495,9 +1510,11 @@ def _calc_geom_stuff(gdf_in: gpd.GeoDataFrame, verbose: bool = False) -> gpd.Geo
   :rtype: geopandas.GeoDataFrame
   """
 
+  print("HO")
   gdf = get_cached_df(gdf_in, "geom/stuff", "key")
   if gdf is not None:
     return gdf
+  print("YO")
 
   t = TimingData()
   t.start("rectangularity")
