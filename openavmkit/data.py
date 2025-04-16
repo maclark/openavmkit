@@ -1235,12 +1235,16 @@ def _enrich_df_basic(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: dict[
   df = df_in.copy()
   s_ref = s_enrich_this.get("ref_tables", [])
   s_calc = s_enrich_this.get("calc", {})
+  s_tweak = s_enrich_this.get("tweak", {})
 
   # reference tables:
   df = _perform_ref_tables(df, s_ref, dataframes, verbose=verbose)
 
   # calculations:
   df = perform_calculations(df, s_calc)
+
+  # tweaks:
+  df = perform_tweaks(df, s_tweak)
 
   # enrich year built:
   df = _enrich_year_built(df, settings, is_sales)

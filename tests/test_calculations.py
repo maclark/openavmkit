@@ -1,7 +1,7 @@
 import pandas as pd
 from IPython.core.display_functions import display
 
-from openavmkit.calculations import perform_calculations, _crawl_calc_dict_for_fields
+from openavmkit.calculations import perform_calculations, _crawl_calc_dict_for_fields, perform_tweaks
 from openavmkit.filters import resolve_filter
 from openavmkit.utilities.assertions import dfs_are_equal
 
@@ -1679,3 +1679,42 @@ def test_split_condition():
   df = perform_calculations(df, calc)
 
   assert dfs_are_equal(df, df_expected)
+
+
+def test_tweaks():
+  data = {
+    "id": [0, 1, 2, 3, 4, 5],
+    "fruit": ["apple", "banana", "cherry", "date", "elderberry", "crapple"],
+    "fruit_score": ["A  100%", "B  80%", "C  60%", "D  40%", "E  20%", "F  0%"],
+  }
+  df = pd.DataFrame(data=data)
+  expected = {
+    "id": [0, 1, 2, 3, 4, 5],
+    "fruit": ["crapple", "banana", "cherry", "date", "apple", "strawberry"],
+    "fruit_score": ["F  0%", "B  80%", "C  60%", "D  40%", "A  100%", "AA  120%"],
+  }
+  df_expected = pd.DataFrame(data=expected)
+
+  tweaks = [
+    {
+      "field": "fruit",
+      "key": "id",
+      "values": {
+        0: "crapple",
+        4: "apple",
+        5: "strawberry"
+      }
+    },
+    {
+      "field": "fruit_score",
+      "key": "id",
+      "values": {
+        0: "F  0%",
+        4: "A  100%",
+        5: "AA  120%"
+      }
+    }
+  ]
+
+  df_result = perform_tweaks(df, tweaks)
+  assert dfs_are_equal(df_result, df_expected)

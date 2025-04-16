@@ -8,6 +8,21 @@ from openavmkit.utilities.data import div_field_z_safe
 from openavmkit.utilities.geometry import get_crs
 
 
+def perform_tweaks(df_in: pd.DataFrame, tweak: list):
+  df = df_in.copy()
+  for entry in tweak:
+    field = entry.get("field")
+    key_field = entry.get("key")
+    values = entry.get("values", {})
+    if field not in df:
+      raise ValueError(f"Field not found: \"{field}\"")
+    if key_field not in df:
+      raise ValueError(f"Key not found: \"{key_field}\"")
+    for key in values:
+      value = values[key]
+      df.loc[df[key_field].eq(key), field] = value
+  return df
+
 def perform_calculations(df_in: pd.DataFrame, calc: dict):
   df = df_in.copy()
   for new_field in calc:
