@@ -10,6 +10,10 @@ import sys
 import shutil
 import site
 
+from openavmkit.utilities.geometry import get_crs
+from openavmkit.utilities.timing import TimingData
+
+
 class OvertureService:
     """Service for fetching and processing Overture building data."""
     
@@ -20,14 +24,7 @@ class OvertureService:
             warnings.warn("No Overture settings found in settings dictionary")
         self.cache_dir = "cache/overture"
         os.makedirs(self.cache_dir, exist_ok=True)
-        
-        # Check if overturemaps is installed
-        try:
-            import importlib.util
-            if importlib.util.find_spec('overturemaps') is None:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "overturemaps"])
-        except Exception as e:
-            warnings.warn(f"Failed to install overturemaps: {str(e)}")
+
 
     def _find_overturemaps_executable(self):
         """Find the overturemaps executable in the current Python environment."""
@@ -64,6 +61,7 @@ class OvertureService:
         Returns:
             GeoDataFrame with building footprints
         """
+        t = TimingData()
         try:
             if verbose:
                 print(f"--> Current settings: {self.settings}")
@@ -104,7 +102,8 @@ class OvertureService:
                 
                 if verbose:
                     print("--> Running overturemaps CLI...")
-                
+
+                # TODO: Replace this with a cross-platform solution that doesn't download an EXE
                 # Find the overturemaps executable
                 overturemaps_path = self._find_overturemaps_executable()
                 if verbose:
@@ -151,14 +150,21 @@ class OvertureService:
                 
                 if not gdf.empty:
                     # Calculate footprint areas
-                    if verbose:
-                        print("--> Calculating building footprint areas...")
+                    t.start("area")
                     gdf["bldg_area_footprint_sqft"] = gdf.to_crs(gdf.estimate_utm_crs()).area * 10.764  # Convert m² to ft²
+                    t.stop("area")
+                    if verbose:
+                        _t = t.get("area")
+                        print(f"--> Calculated building footprint areas...({_t:.2f}s)")
 
                     if use_cache:
-                        if verbose:
-                            print(f"--> Saving to cache: {cache_path}")
+                        t.start("save")
                         gdf.to_parquet(cache_path)
+                        t.stop("save")
+                        if verbose:
+                            _t = t.get("save")
+                            print(f"--> Saving to cache: {cache_path}...({_t:.2f}s)")
+
 
                 # Clean up temporary file
                 try:
@@ -185,46 +191,69 @@ class OvertureService:
             warnings.warn(f"Failed to fetch Overture building data: {str(e)}\n{traceback.format_exc()}")
             return gpd.GeoDataFrame()
 
-    def calculate_building_footprints(self, gdf: gpd.GeoDataFrame, buildings: gpd.GeoDataFrame, verbose: bool = False) -> gpd.GeoDataFrame:
+    def calculate_building_footprints(
+        self,
+        gdf: gpd.GeoDataFrame,
+        buildings: gpd.GeoDataFrame,
+        desired_units: str,
+        field_name: str = "bldg_area_footprint_sqft",
+        verbose: bool = False
+    ) -> gpd.GeoDataFrame:
         """
         Calculate building footprint areas for each parcel by intersecting with building geometries.
         
         Args:
             gdf: GeoDataFrame containing parcels
             buildings: GeoDataFrame containing building footprints
+            desired_units: Units for area calculation (supported: "sqft", "sqm")
             verbose: Whether to print detailed progress
             
         Returns:
             GeoDataFrame with added building footprint areas
         """
+        t = TimingData()
         if buildings.empty:
             if verbose:
                 print("--> No buildings found, returning original GeoDataFrame")
             gdf["bldg_area_footprint_sqft"] = 0
             return gdf
 
+        # Get appropriate unit conversion
+        unit_mult = 1.0
+        if desired_units == "sqft":
+            unit_mult = 10.764  # Convert m² to sqft
+        elif desired_units == "sqm":
+            unit_mult = 1.0
+        else:
+            raise ValueError(f"Unsupported units: {desired_units}. Supported units are 'sqft' and 'sqm'.")
+
+        t.start("crs")
         # Convert both to same CRS for spatial operations
         buildings = buildings.to_crs(gdf.crs)
         
         # Get appropriate CRS for area calculations
-        area_crs = gdf.estimate_utm_crs()
-        
-        if verbose:
-            print("--> Calculating building footprint intersections with parcels...")
-        
+        area_crs = get_crs(gdf, "equal_area")
+
         # Project both datasets to equal area CRS for accurate area calculations
         buildings_projected = buildings.to_crs(area_crs)
         gdf_projected = gdf.to_crs(area_crs)
-        
+        t.stop("crs")
+
+        if verbose:
+            _t = t.get("crs")
+            print(f"--> Projected to equal area CRS...({_t:.2f}s)")
+
+        t.start("join")
         # Perform spatial join to find all building-parcel intersections
         joined = gpd.sjoin(gdf_projected, buildings_projected, how="left", predicate="intersects")
-        
+        t.stop("join")
+
+        if verbose:
+            _t = t.get("join")
+            print(f"--> Calculated building footprint intersections with parcels...({_t:.2f}s)")
+
         if verbose:
             print(f"--> Found {len(joined)} potential building-parcel intersections")
-        
-        # Calculate actual intersection areas
-        if verbose:
-            print("--> Calculating precise intersection areas...")
         
         def calculate_intersection_area(row):
             try:
@@ -235,30 +264,53 @@ class OvertureService:
                 building_geom = buildings_projected.loc[building_idx, 'geometry']
                 if parcel_geom.intersects(building_geom):
                     intersection = parcel_geom.intersection(building_geom)
-                    return intersection.area * 10.764  # Convert m² to ft²
+                    return intersection.area * unit_mult # Convert to desired units
                 return 0.0
             except Exception as e:
                 if verbose:
                     print(f"Warning: Error calculating intersection area: {e}")
                 return 0.0
-        
+
+        t.start("calc_area")
+        # TODO: Optimize this step using vectorized operations if possible
         # Calculate intersection areas
-        joined['bldg_area_footprint_sqft'] = joined.apply(calculate_intersection_area, axis=1)
-        
-        # Aggregate total building footprint area per parcel
-        agg = joined.groupby("key")["bldg_area_footprint_sqft"].sum().reset_index()
-        
-        # Merge back to original dataframe
-        gdf = gdf.merge(agg, on="key", how="left")
-        
-        # Fill NaN values with 0 (parcels with no buildings)
-        gdf["bldg_area_footprint_sqft"] = gdf["bldg_area_footprint_sqft"].fillna(0)
-        
+        joined[field_name] = joined.apply(calculate_intersection_area, axis=1)
+        t.stop("calc_area")
+
+        # Calculate actual intersection areas
         if verbose:
+            _t = t.get("calc_area")
+            print(f"--> Calculating precise intersection areas...({_t:.2f}s)")
+
+        # Aggregate total building footprint area per parcel
+        t.start("agg")
+        agg = joined.groupby("key")[field_name].sum().reset_index()
+        t.stop("agg")
+
+        if verbose:
+            _t = t.get("agg")
+            print(f"--> Aggregating building footprint areas...({_t:.2f}s)")
+
+        t.start("finish")
+        # Merge back to original dataframe
+        gdf = gdf.merge(agg, on="key", how="left", suffixes=("", "_agg"))
+
+        if f"{field_name}_agg" in gdf.columns:
+            # If the original field name existed, then we will stomp with non-null values from the calculated field
+            gdf.loc[~gdf[f"{field_name}_agg"].isna(), field_name] = gdf[f"{field_name}_agg"]
+            gdf.drop(columns=[f"{field_name}_agg"], inplace=True)
+
+        # Fill NaN values with 0 (parcels with no buildings)
+        gdf[field_name] = gdf[field_name].fillna(0)
+        t.stop("finish")
+
+        if verbose:
+            _t = t.get("finish")
+            print(f"--> Finished up...({_t:.2f}s)")
             print(f"--> Added building footprint areas to {len(agg)} parcels")
-            print(f"--> Total building footprint area: {gdf['bldg_area_footprint_sqft'].sum():,.0f} sqft")
-            print(f"--> Average building footprint area: {gdf['bldg_area_footprint_sqft'].mean():,.0f} sqft")
-            print(f"--> Number of parcels with buildings: {(gdf['bldg_area_footprint_sqft'] > 0).sum():,}")
+            print(f"--> Total building footprint area: {gdf[field_name].sum():,.0f} sqft")
+            print(f"--> Average building footprint area: {gdf[field_name].mean():,.0f} sqft")
+            print(f"--> Number of parcels with buildings: {(gdf[field_name] > 0).sum():,}")
             
         return gdf
 

@@ -1338,6 +1338,7 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
 
   # Enrich with Overture building data if enabled
   if s_overture.get("enabled", False):
+
     if verbose:
       print("Enriching with Overture building data...")
     
@@ -1355,7 +1356,16 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
     
     if not buildings.empty:
       # Calculate building footprints
-      gdf = overture_service.calculate_building_footprints(gdf, buildings, verbose=verbose)
+      s_footprint = s_overture.get("footprint", {})
+      footprint_units = s_footprint.get("units", None)
+      if footprint_units is None:
+        warnings.warn("`process.enrich.overture.footprint.units` not specified, defaulting to 'sqft'")
+        footprint_units = "sqft"
+      footprint_field = s_footprint.get("field", None)
+      if footprint_field is None:
+        warnings.warn("`process.enrich.overture.footprint.field` not specified, defaulting to 'bldg_area_footprint_sqft'")
+        footprint_field = "bldg_area_footprint_sqft"
+      gdf = overture_service.calculate_building_footprints(gdf, buildings, footprint_units, footprint_field, verbose=verbose)
     elif verbose:
       print("--> No buildings found in the area")
 
