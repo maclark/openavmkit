@@ -343,12 +343,14 @@ def _fill_unknown_values(df, settings: dict):
 	# If year built doesn't exist, but age in years does, derive year built from that
 
 	if "bldg_year_built" in df:
-		df["bldg_age_years"] = valuation_year - df["bldg_year_built"]
+		df.loc[df["bldg_year_built"].gt(0), "bldg_age_years"] = valuation_year - df["bldg_year_built"]
+		df.loc[df["bldg_year_built"].le(0), "bldg_age_years"] = 0
 	elif "bldg_age_years" in df:
 		df["bldg_year_built"] = valuation_year - df["bldg_age_years"]
 
 	if "bldg_effective_year_built" in df:
-		df["bldg_effective_age_years"] = valuation_year - df["bldg_effective_year_built"]
+		df.loc[df["bldg_effective_year_built"].gt(0), "bldg_effective_age_years"] = valuation_year - df["bldg_effective_year_built"]
+		df.loc[df["bldg_effective_year_built"].le(0), "bldg_effective_age_years"] = 0
 	elif "bldg_effective_age_years" in df:
 		df["bldg_effective_year_built"] = valuation_year - df["bldg_effective_age_years"]
 

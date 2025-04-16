@@ -930,8 +930,21 @@ def _do_enrich_year_built(df: pd.DataFrame, col: str, new_col: str, val_date: da
   if not is_sales:
     val_year = val_date.year
     df[new_col] = val_year - df[col]
+
+    # Avoid 2000+ year old buildings whose year built is 0
+    df.loc[
+      df[col].isna() |
+      df[col].le(0),
+      new_col
+    ] = 0
   else:
     df.loc[df["sale_year"].notna(), new_col] = df["sale_year"] - df[col]
+
+    df.loc[
+      df["sale_year"].isna() |
+      df["sale_year"].le(0),
+      new_col
+    ] = 0
   return df
 
 
