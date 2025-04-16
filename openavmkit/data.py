@@ -18,7 +18,7 @@ import traceback
 
 from openavmkit.calculations import _crawl_calc_dict_for_fields, perform_calculations, perform_tweaks
 from openavmkit.filters import resolve_filter, select_filter
-from openavmkit.utilities.cache import check_cache, write_cache, read_cache
+from openavmkit.utilities.cache import check_cache, write_cache, read_cache, get_cached_df, write_cached_df
 from openavmkit.utilities.data import combine_dfs, div_field_z_safe, merge_and_stomp_dfs
 from openavmkit.utilities.geometry import get_crs, clean_geometry, identify_irregular_parcels, get_exterior_coords, \
 	geolocate_point_to_polygon, is_likely_epsg4326
@@ -1483,7 +1483,7 @@ def _basic_geo_enrichment(gdf: gpd.GeoDataFrame, settings: dict, verbose: bool =
   return gdf
 
 
-def _calc_geom_stuff(gdf: gpd.GeoDataFrame, verbose: bool = False) -> gpd.GeoDataFrame:
+def _calc_geom_stuff(gdf_in: gpd.GeoDataFrame, verbose: bool = False) -> gpd.GeoDataFrame:
   """
   Compute additional geometric properties for a GeoDataFrame, such as rectangularity and aspect ratio.
 
@@ -1495,8 +1495,13 @@ def _calc_geom_stuff(gdf: gpd.GeoDataFrame, verbose: bool = False) -> gpd.GeoDat
   :rtype: geopandas.GeoDataFrame
   """
 
+  gdf = get_cached_df(gdf_in, "geom/stuff", "key")
+  if gdf is not None:
+    return gdf
+
   t = TimingData()
   t.start("rectangularity")
+  gdf = gdf_in.copy()
   min_rotated_rects = gdf.geometry.apply(lambda geom: geom.minimum_rotated_rectangle)
   min_rotated_rects_area_delta = np.abs(min_rotated_rects.area - gdf.geometry.area)
   min_rotated_rects_area_delta_percent = div_field_z_safe(min_rotated_rects_area_delta, gdf.geometry.area)
@@ -1516,6 +1521,8 @@ def _calc_geom_stuff(gdf: gpd.GeoDataFrame, verbose: bool = False) -> gpd.GeoDat
     _t = t.get("aspect_ratio")
     print(f"--> calculated parcel aspect ratios...({_t:.2f}s)")
   gdf = identify_irregular_parcels(gdf, verbose)
+
+  write_cached_df(gdf_in, gdf, "geom/stuff", "key")
   return gdf
 
 
@@ -2851,4 +2858,3 @@ def _assign_modal_model_group_to_common_area(df_univ_in: gpd.GeoDataFrame, model
   df_return = combine_dfs(df_return, df[["key", "model_group"]], df2_stomps=True, index="key")
   df_return.to_parquet("out/look/common_area-3-return.parquet")
   return df_return
-

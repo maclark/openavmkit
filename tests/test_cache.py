@@ -5,11 +5,11 @@ import pandas as pd
 
 from openavmkit.synthetic.basic import generate_basic
 from openavmkit.utilities.assertions import dicts_are_equal, dfs_are_equal
-from openavmkit.utilities.cache import check_cache, write_cache, read_cache
+from openavmkit.utilities.cache import check_cache, write_cache, read_cache, get_cached_df, write_cached_df, clear_cache
+from openavmkit.utilities.geometry import ensure_geometries
 
 
 def test_cache():
-
   signature = {
     'id': '12345'
   }
@@ -41,7 +41,7 @@ def test_cache():
     },
     {
       "extension": "parquet",
-      "filetype": "gdf",
+      "filetype": "df",
       "payload": gdf
     }
   ]
@@ -81,9 +81,13 @@ def test_cache():
         cache = f.read()
         assert str(cache) == str(payload)
     elif filetype == "df" or filetype == "gdf":
-      cache = pd.read_parquet("cache/test_cache.parquet")
-      if filetype == "gdf":
-        cache["geometry"] = geopandas.GeoSeries.from_wkb(cache["geometry"])
+      try:
+        cache = geopandas.read_parquet("cache/test_cache.parquet")
+        if "geometry" in cache:
+          cache = ensure_geometries(cache, "geometry", cache.crs)
+      except ValueError:
+        cache = pd.read_parquet("cache/test_cache.parquet")
+
       assert dfs_are_equal(cache, payload, "key")
 
     is_cached = check_cache("test_cache", signature, filetype)
@@ -110,3 +114,86 @@ def test_cache():
     is_cached = check_cache("test_cache", dirty_signature, filetype)
 
     assert is_cached == False
+
+
+def test_cache_df():
+
+  # clear every FILE in the cache:
+  for file in os.listdir("cache"):
+    file_path = os.path.join("cache", file)
+    if os.path.isfile(file_path):
+      os.remove(file_path)
+
+  data = {
+    "key": [1, 2, 3],
+    "fruit": ["apple", "banana", "cherry"],
+    "quantity": [10, 20, 30],
+    "price": [0.5, 0.25, 0.75]
+  }
+  df = pd.DataFrame(data)
+
+  expected = {
+    "key": [1, 2, 3],
+    "fruit": ["apple", "banana", "cherry"],
+    "quantity": [10, 20, 30],
+    "price": [0.5, 0.25, 0.75],
+    "calories": [52, 89, 50],
+    "score": [0.8, 0.9, 0.7],
+    "awesomeness": [0.9, 0.95, 0.85]
+  }
+  df_expected = pd.DataFrame(expected)
+
+  def enrich_fruit(df_in: pd.DataFrame) -> (pd.DataFrame, str):
+    _df = get_cached_df(df_in, "fruit", "key")
+    if _df is not None:
+      return _df, "cached"
+
+    _df = df_in.copy()
+    _df["calories"] = [52, 89, 50]
+    _df["score"] = [0.8, 0.9, 0.7]
+    _df["awesomeness"] = [0.9, 0.95, 0.85]
+
+    write_cached_df(df_in, _df, "fruit", "key")
+    return _df, "uncached"
+
+  df_enriched, was_cached = enrich_fruit(df)
+
+  assert was_cached == "uncached"
+  assert dfs_are_equal(df_enriched, df_expected, "key")
+
+  df_enriched, was_cached = enrich_fruit(df)
+
+  assert was_cached == "cached"
+  assert dfs_are_equal(df_enriched, df_expected, "key")
+  clear_cache("fruit", "df")
+
+
+def test_cache_df2():
+
+  clear_cache("synthetic", "df")
+
+  synthetic = generate_basic(100)
+  gdf = synthetic.df_universe
+
+  gdf_skinny = gdf[["key", "geometry"]].copy()
+  gdf_stuff = gdf.drop(columns=["geometry"]).copy()
+
+  def enrich_gdf(gdf_in: geopandas.GeoDataFrame):
+    gdf_out = get_cached_df(gdf_in, "synthetic", "key")
+    if gdf_out is not None:
+      return gdf_out, "cached"
+
+    gdf_out = gdf_in.copy()
+    gdf_out = gdf_out.merge(gdf_stuff, on="key", how="left")
+
+    write_cached_df(gdf_in, gdf_out, "synthetic", "key")
+    return gdf_out, "uncached"
+
+  gdf_enriched, was_cached = enrich_gdf(gdf_skinny)
+  assert was_cached == "uncached"
+  assert dfs_are_equal(gdf_enriched, gdf, "key")
+
+  gdf_enriched, was_cached = enrich_gdf(gdf_skinny)
+  assert was_cached == "cached"
+  assert dfs_are_equal(gdf_enriched, gdf, "key")
+  clear_cache("synthetic", "df")

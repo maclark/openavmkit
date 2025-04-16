@@ -1,3 +1,4 @@
+import binascii
 import math
 import warnings
 
@@ -5,8 +6,10 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
+from shapely import wkt, wkb
 from geopy import Point
 from geopy.distance import distance
+from shapely.geometry.base import BaseGeometry
 from pyproj import CRS
 from shapely import Polygon, MultiPolygon, LineString
 
@@ -399,6 +402,77 @@ def create_geo_rect(lat, lon, crs, width_km, height_km, anchor_point="center"):
   gdf = gpd.GeoDataFrame(geometry=[polygon], crs=crs)
 
   return gdf
+
+
+def ensure_geometries(df, geom_col="geometry", crs=None):
+  """
+  Parse a DataFrame whose `geom_col` may be:
+    - Shapely geometries
+    - WKT strings
+    - WKB bytes/bytearray
+    - Hex‐encoded WKB strings (with or without "0x" prefix)
+    - numpy.bytes_ scalars, memoryviews, etc.
+
+  Returns a brand‑new GeoDataFrame with a _clean_ geometry column.
+  """
+  # Copy into a plain DataFrame (drops any old GeoDataFrame metadata)
+  data = pd.DataFrame(df).copy()
+
+  def _parse(val):
+    # 1) Nulls
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+      return None
+    # 2) Already Shapely?
+    if isinstance(val, BaseGeometry):
+      return val
+    # 3) Geo‑interface dicts
+    if hasattr(val, "__geo_interface__"):
+      from shapely.geometry import shape
+      return shape(val)
+    # 4) Strings: try WKT first, then hex WKB
+    if isinstance(val, str):
+      s = val.strip()
+      if s.lower().startswith("0x"):
+        s = s[2:]
+      try:
+        return wkt.loads(val)
+      except Exception:
+        raw = binascii.unhexlify(s)
+        return wkb.loads(raw)
+    # 5) Bytes‐like
+    if isinstance(val, (bytes, bytearray, memoryview)):
+      raw = val.tobytes() if isinstance(val, memoryview) else val
+      return wkb.loads(raw)
+    # 6) numpy bytes_ or other numpy scalar
+    if isinstance(val, np.generic):
+      try:
+        b = bytes(val)
+        return wkb.loads(b)
+      except Exception:
+        pass
+    # 7) Anything with tobytes()
+    if hasattr(val, "tobytes"):
+      try:
+        raw = val.tobytes()
+        return wkb.loads(raw)
+      except Exception:
+        pass
+
+    raise TypeError(f"Cannot parse geometry of type {type(val)}")
+
+  # Parse into a plain pandas Series of Shapely objects
+  parsed = data[geom_col].apply(_parse)
+
+  # Build a GeoSeries (so GeoPandas trusts it)
+  geom_series = gpd.GeoSeries(parsed.values.tolist(),
+    index=data.index,
+    crs=crs)
+
+  # Drop the old column and assemble
+  df_clean = data.drop(columns=[geom_col])
+  return gpd.GeoDataFrame(df_clean,
+    geometry=geom_series,
+    crs=crs)
 
 
 def clean_geometry(gdf, ensure_polygon=True, target_crs=None):

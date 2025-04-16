@@ -4,6 +4,7 @@ import pandas as pd
 import geopandas as gpd
 
 from openavmkit.utilities.assertions import objects_are_equal, dicts_are_equal
+from openavmkit.utilities.geometry import ensure_geometries
 
 
 def write_cache(
@@ -21,11 +22,6 @@ def write_cache(
       json.dump(payload, file)
     elif filetype == "str":
       file.write(payload)
-    elif filetype == "gdf":
-      if isinstance(payload, gpd.GeoDataFrame):
-        payload.to_parquet(path)
-      else:
-        raise TypeError("Payload must be a GeoDataFrame for gdf type.")
     elif filetype == "df":
       if isinstance(payload, pd.DataFrame):
         payload.to_parquet(path)
@@ -59,12 +55,16 @@ def read_cache(
         return json.load(file)
       elif filetype == "str":
         return file.read()
-      elif filetype == "gdf":
-        import geopandas as gpd
-        return gpd.read_parquet(path)
       elif filetype == "df":
         import pandas as pd
-        return pd.read_parquet(path)
+        try:
+          df = gpd.read_parquet(path)
+          if "geometry" in df:
+            df = gpd.GeoDataFrame(df, geometry="geometry")
+            ensure_geometries(df, "geometry", df.crs)
+        except ValueError:
+          df = pd.read_parquet(path)
+        return df
   return None
 
 
@@ -81,6 +81,78 @@ def check_cache(
     return path_exists
   return False
 
+
+def clear_cache(
+    filename: str,
+    filetype: str
+):
+  ext = _get_extension(filetype)
+  path = f"cache/{filename}"
+  if os.path.exists(f"{path}.{ext}"):
+    os.remove(f"{path}.{ext}")
+  if os.path.exists(f"{path}.signature.json"):
+    os.remove(f"{path}.signature.json")
+
+
+def write_cached_df(
+    df_orig: pd.DataFrame,
+    df_new: pd.DataFrame,
+    filename: str,
+    key: str = "key"
+)-> bool:
+
+  new_cols = [col for col in df_new.columns if col not in df_orig.columns]
+  if len(new_cols) == 0:
+    return False
+
+  df_diff = df_new[[key]+new_cols].copy()
+
+  signature = _get_df_signature(df_orig)
+
+  df_type = "df"
+
+  write_cache(filename, df_diff, signature, df_type)
+  return True
+
+def get_cached_df(
+    df: pd.DataFrame,
+    filename: str,
+    key: str = "key"
+)->pd.DataFrame | gpd.GeoDataFrame | None:
+  signature = _get_df_signature(df)
+
+  if check_cache(filename, signature, "df"):
+    df_cache = read_cache(filename, "df")
+    if df_cache is not None:
+      df_result = df.merge(df_cache, how="left", on=key)
+      return df_result
+  return None
+
+
+def _get_df_signature(df: pd.DataFrame):
+  return {
+    "rows": len(df),
+    "columns": len(df.columns),
+    "checksum": _cheap_checksum(df)
+  }
+
+
+def _cheap_checksum(df: pd.DataFrame):
+  checksum = {}
+  for col in df.columns:
+    # if it's geometry:
+    # if it's numeric:
+    if pd.api.types.is_numeric_dtype(df[col]):
+      checksum[col] = float(df[col].sum())
+    elif col == "geometry":
+      # just note how many geometry rows are not null:
+      checksum[col] = float((~df[col].isna()).sum())
+    else:
+      try:
+        checksum[col] = str(df[col].value_counts())
+      except TypeError:
+        checksum[col] = float(df[col].apply(lambda x: str(x).encode("utf-8")).sum())
+  return checksum
 
 def _match_signature(
     filename: str,
@@ -111,8 +183,6 @@ def _get_extension(filetype:str):
     return "json"
   elif filetype == "str":
     return "txt"
-  elif filetype == "gdf":
-    return "parquet"
   elif filetype == "df":
     return "parquet"
   elif filetype == "json":
@@ -120,5 +190,5 @@ def _get_extension(filetype:str):
   elif filetype == "txt" or filetype == "text":
     raise ValueError(f"Filetype '{filetype}' is unsupported, did you mean 'str'?")
   elif filetype == "parquet":
-    raise ValueError(f"Filetype 'parquet' is ambiguous: please use 'gdf' or 'df' instead")
+    raise ValueError(f"Filetype 'parquet' is ambiguous: please use 'df' instead")
   raise ValueError(f"Unsupported filetype: '{filetype}'")
