@@ -215,9 +215,6 @@ def try_variables(
 			results = entry[vacant_status]
 			display(results)
 
-			# i = 1
-			# for var in best_vars:
-			# 	print(f"{i}. {var}")
 			for var in results["variable"].unique():
 				if var in df_hydrated.columns:
 					# do a correlation scatter plot of the variable vs. the dependent variable (sale_field):
