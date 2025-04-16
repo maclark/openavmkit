@@ -2360,7 +2360,7 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
   for entry in merge_list:
     df_id = None
     how = "left"
-    on = "key"
+    on = required_key
     left_on = None
     right_on = None
 
@@ -2435,7 +2435,7 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
     _id = merge["id"]
     df = merge.get("df", None)
     how = merge.get("how", "left")
-    on = merge.get("on", "key")
+    on = merge.get("on", required_key)
     left_on = merge.get("left_on", None)
     right_on = merge.get("right_on", None)
     dupes = merge.get("dupes", None)
