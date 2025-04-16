@@ -423,6 +423,12 @@
 		"type": "number",
 		"groups": ["building"]
 	},
+	"osm_bldg_area_footprint_sqft":{
+		"name": "Building area (footprint) in square feet (OSM)",
+		"description": "Building area (footprint) in square feet (from Open Street Map)",
+		"type": "number",
+		"groups": ["building", "osm"]
+	},
 	"bldg_stories":{
 		"name": "Building stories",
 		"description": "Number of stories in the building",
