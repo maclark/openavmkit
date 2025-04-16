@@ -16,7 +16,7 @@ from shapely.ops import unary_union
 import warnings
 import traceback
 
-from openavmkit.calculations import _crawl_calc_dict_for_fields, perform_calculations
+from openavmkit.calculations import _crawl_calc_dict_for_fields, perform_calculations, perform_tweaks
 from openavmkit.filters import resolve_filter, select_filter
 from openavmkit.utilities.cache import check_cache, write_cache, read_cache
 from openavmkit.utilities.data import combine_dfs, div_field_z_safe, merge_and_stomp_dfs
@@ -30,6 +30,8 @@ from openavmkit.utilities.census import CensusService
 from openavmkit.utilities.openstreetmap import init_service_openstreetmap
 from openavmkit.utilities.overture import init_service_overture
 from openavmkit.inference import get_inference_model, perform_spatial_inference
+from openavmkit.utilities.timing import TimingData
+
 
 @dataclass
 class SalesUniversePair:
@@ -1440,28 +1442,44 @@ def _basic_geo_enrichment(gdf: gpd.GeoDataFrame, settings: dict, verbose: bool =
   :returns: Enriched GeoDataFrame.
   :rtype: geopandas.GeoDataFrame
   """
+  t = TimingData()
+
   if verbose:
     print(f"Performing basic geometric enrichment...")
-  if verbose:
-    print(f"--> adding latitude/longitude...")
+  t.start("latlon")
   gdf_latlon = gdf.to_crs(get_crs(gdf, "latlon"))
   gdf_area = gdf.to_crs(get_crs(gdf, "equal_area"))
   gdf["latitude"] = gdf_latlon.geometry.centroid.y
   gdf["longitude"] = gdf_latlon.geometry.centroid.x
   gdf["latitude_norm"] = (gdf["latitude"] - gdf["latitude"].min()) / (gdf["latitude"].max() - gdf["latitude"].min())
   gdf["longitude_norm"] = (gdf["longitude"] - gdf["longitude"].min()) / (gdf["longitude"].max() - gdf["longitude"].min())
+  t.stop("latlon")
   if verbose:
-    print(f"--> calculate GIS area of each parcel...")
+    _t = t.get("latlon")
+    print(f"--> added latitude/longitude...({_t:.2f}s)")
+  t.start("area")
   gdf["land_area_gis_sqft"] = gdf_area.geometry.area
   gdf["land_area_given_sqft"] = gdf["land_area_sqft"]
   gdf["land_area_sqft"] = gdf["land_area_sqft"].combine_first(gdf["land_area_gis_sqft"])
   gdf["land_area_gis_delta_sqft"] = gdf["land_area_gis_sqft"] - gdf["land_area_sqft"]
   gdf["land_area_gis_delta_percent"] = div_field_z_safe(gdf["land_area_gis_delta_sqft"], gdf["land_area_sqft"])
+  t.stop("area")
   if verbose:
-    print(f"--> counting vertices per parcel...")
+    _t = t.get("area")
+    print(f"--> calculated GIS area of each parcel...({_t:.2f}s)")
+  t.start("vertices")
   gdf["geom_vertices"] = gdf.geometry.apply(get_exterior_coords)
+  t.stop("vertices")
+  if verbose:
+    _t = t.get("vertices")
+    print(f"--> counted vertices per parcel...({_t:.2f}s)")
   gdf = _calc_geom_stuff(gdf, verbose)
+  t.start("polar")
   gdf = _enrich_polar_coordinates(gdf, settings, verbose)
+  t.stop("polar")
+  if verbose:
+    _t = t.get("polar")
+    print(f"--> calculated polar coordinates...({_t:.2f}s)")
   return gdf
 
 
@@ -1477,19 +1495,26 @@ def _calc_geom_stuff(gdf: gpd.GeoDataFrame, verbose: bool = False) -> gpd.GeoDat
   :rtype: geopandas.GeoDataFrame
   """
 
-  if verbose:
-    print(f"--> calculating parcel rectangularity...")
+  t = TimingData()
+  t.start("rectangularity")
   min_rotated_rects = gdf.geometry.apply(lambda geom: geom.minimum_rotated_rectangle)
   min_rotated_rects_area_delta = np.abs(min_rotated_rects.area - gdf.geometry.area)
   min_rotated_rects_area_delta_percent = div_field_z_safe(min_rotated_rects_area_delta, gdf.geometry.area)
   gdf["geom_rectangularity_num"] = 1.0 - min_rotated_rects_area_delta_percent
   coords = min_rotated_rects.apply(lambda rect: np.array(rect.exterior.coords[:-1]))  # Drop duplicate last point
+  t.stop("rectangularity")
   if verbose:
-    print(f"--> calculating parcel aspect ratios...")
+    _t = t.get("rectangularity")
+    print(f"--> calculated parcel rectangularity...({_t:.2f}s)")
+  t.start("aspect_ratio")
   edge_lengths = coords.apply(lambda pts: np.sqrt(np.sum(np.diff(pts, axis=0) ** 2, axis=1)))
   dimensions = edge_lengths.apply(lambda lengths: np.sort(lengths)[:2])
   aspect_ratios = dimensions.apply(lambda dims: dims[1] / dims[0] if dims[0] != 0 else float('inf'))
   gdf["geom_aspect_ratio"] = aspect_ratios
+  t.stop("aspect_ratio")
+  if verbose:
+    _t = t.get("aspect_ratio")
+    print(f"--> calculated parcel aspect ratios...({_t:.2f}s)")
   gdf = identify_irregular_parcels(gdf, verbose)
   return gdf
 
