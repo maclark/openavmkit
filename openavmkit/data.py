@@ -602,9 +602,6 @@ def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str, pd
 
     s_enrich_local: dict | None = s_enrich.get(supkey, None)
 
-    # stuff to enrich whether the user has settings or not
-    df = _enrich_vacant(df)
-
     if s_enrich_local is not None:
       # Handle Census enrichment for universe if enabled
       if supkey == "universe" and "census" in s_enrich_local:
@@ -617,9 +614,12 @@ def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str, pd
       df = _enrich_df_geometry(df, s_enrich_local, dataframes, settings, supkey == "sales", verbose=verbose)
       df = _enrich_df_basic(df, s_enrich_local, dataframes, settings, supkey == "sales", verbose=verbose)
 
-    sup.set(supkey, df)
+      if supkey == "universe":
 
-    #sup = _enrich_sup_spatial_lag(sup, settings, verbose=verbose)
+    # stuff to enrich whether the user has settings or not
+    df = _enrich_vacant(df, settings)
+
+    sup.set(supkey, df)
 
   return sup
 
@@ -1208,7 +1208,7 @@ def _finesse_columns(df_in: pd.DataFrame | gpd.GeoDataFrame, suffix_left: str, s
   return df
 
 
-def _enrich_vacant(df_in: pd.DataFrame) -> pd.DataFrame:
+def _enrich_vacant(df_in: pd.DataFrame, settings:dict) -> pd.DataFrame:
   """
   Enrich the DataFrame by determining vacant properties based on finished building area.
 
@@ -1223,6 +1223,12 @@ def _enrich_vacant(df_in: pd.DataFrame) -> pd.DataFrame:
     df["is_vacant"] = False
     df.loc[pd.isna(df["bldg_area_finished_sqft"]), "bldg_area_finished_sqft"] = 0
     df.loc[df["bldg_area_finished_sqft"].eq(0), "is_vacant"] = True
+
+    idx_vacant = df["is_vacant"].eq(True)
+
+    # Remove building characteristics from anything that is vacant:
+    df = simulate_removed_buildings(df, settings, idx_vacant)
+
   else:
     df = df_in
 
