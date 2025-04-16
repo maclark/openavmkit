@@ -3,7 +3,7 @@ import json
 import pandas as pd
 import geopandas as gpd
 
-from openavmkit.utilities.assertions import objects_are_equal
+from openavmkit.utilities.assertions import objects_are_equal, dicts_are_equal
 
 
 def write_cache(
@@ -76,9 +76,7 @@ def check_cache(
   ext = _get_extension(filetype)
   path = f"cache/{filename}"
   match = _match_signature(path, signature)
-  print(f"Check cache match for '{filename}' = ? {match}")
   if match:
-    return os.path.exists(path)
     path_exists = os.path.exists(f"{path}.{ext}")
     return path_exists
   return False
@@ -97,13 +95,14 @@ def _match_signature(
   sig_file = f"{filename}.signature.{sig_ext}"
   match = False
   if os.path.exists(sig_file):
-    with open(sig_file, "r") as file:
-      signature = file.read()
-    if sig_ext == ".json":
-      signature = json.loads(signature)
-      match = objects_are_equal(signature, signature)
+    if sig_ext == "json":
+      with open(sig_file, "r") as file:
+        cache_signature = json.load(file)
+      match = dicts_are_equal(signature, cache_signature)
     else:
-      match = signature == signature
+      with open(sig_file, "r") as file:
+        cache_signature = file.read()
+      match = signature == cache_signature
   return match
 
 
@@ -116,4 +115,10 @@ def _get_extension(filetype:str):
     return "parquet"
   elif filetype == "df":
     return "parquet"
-  raise ValueError(f"Unsupported filetype: {filetype}")
+  elif filetype == "json":
+    raise ValueError(f"Filetype 'json' is unsupported, did you mean 'dict'?")
+  elif filetype == "txt" or filetype == "text":
+    raise ValueError(f"Filetype '{filetype}' is unsupported, did you mean 'str'?")
+  elif filetype == "parquet":
+    raise ValueError(f"Filetype 'parquet' is ambiguous: please use 'gdf' or 'df' instead")
+  raise ValueError(f"Unsupported filetype: '{filetype}'")
