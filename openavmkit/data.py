@@ -1866,7 +1866,6 @@ def _perform_distance_calculations(df_in: gpd.GeoDataFrame, s_dist: dict, datafr
     if check_cache(f"osm/distance_all", signature, "df"):
       df_net_change = read_cache(f"osm/distance_all", "df")
       df_out = df_in.merge(df_net_change, on="key", how="left")
-      display(df_out)
       return df_out
     
     for entry in s_dist:
@@ -2249,31 +2248,31 @@ def _handle_duplicated_rows(df_in: pd.DataFrame, dupes: str|dict, verbose: bool 
     else:
       sort_by = dupes.get("sort_by", ["key", "asc"])
       if not isinstance(sort_by, list):
-      raise ValueError("sort_by must be a list of string pairs of the form [<field_name>, <asc|desc>]")
-    if len(sort_by) == 2:
-      if isinstance(sort_by[0], str) and isinstance(sort_by[1], str):
-        sort_by = [sort_by]
-    else:
-      for entry in sort_by:
-        if not isinstance(entry, list):
-          raise ValueError(f"sort_by must be a list of string pairs, but found a non-list entry: {entry}")
-        elif len(entry) != 2:
-          raise ValueError(f"sort_by entry has {len(entry)} members: {entry}")
-        elif not isinstance(entry[0], str) or not isinstance(entry[1], str):
-          raise ValueError(f"sort_by entry has non-string members: {entry}")
-    df = df_in.copy()
-    bys = [x[0] for x in sort_by]
-    ascendings = [x[1] == "asc" for x in sort_by]
-    df = df.sort_values(by=bys, ascending=ascendings)
-    if do_drop:
-      if do_drop == "all":
-        df = df.drop_duplicates(subset=subset, keep=False)
+        raise ValueError("sort_by must be a list of string pairs of the form [<field_name>, <asc|desc>]")
+      if len(sort_by) == 2:
+        if isinstance(sort_by[0], str) and isinstance(sort_by[1], str):
+          sort_by = [sort_by]
       else:
-        df = df.drop_duplicates(subset=subset, keep="first")
-      final_len = len(df)
-      if verbose:
-        print(f"Dropped {orig_len - final_len} duplicate rows based on '{subset}'")
-    return df.reset_index(drop=True)
+        for entry in sort_by:
+          if not isinstance(entry, list):
+            raise ValueError(f"sort_by must be a list of string pairs, but found a non-list entry: {entry}")
+          elif len(entry) != 2:
+            raise ValueError(f"sort_by entry has {len(entry)} members: {entry}")
+          elif not isinstance(entry[0], str) or not isinstance(entry[1], str):
+            raise ValueError(f"sort_by entry has non-string members: {entry}")
+      df = df_in.copy()
+      bys = [x[0] for x in sort_by]
+      ascendings = [x[1] == "asc" for x in sort_by]
+      df = df.sort_values(by=bys, ascending=ascendings)
+      if do_drop:
+        if do_drop == "all":
+          df = df.drop_duplicates(subset=subset, keep=False)
+        else:
+          df = df.drop_duplicates(subset=subset, keep="first")
+        final_len = len(df)
+        if verbose:
+          print(f"Dropped {orig_len - final_len} duplicate rows based on '{subset}'")
+      return df.reset_index(drop=True)
   return df_in
 
 
