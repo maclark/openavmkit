@@ -1,3 +1,4 @@
+import math
 import os
 import pickle
 import warnings
@@ -1156,3 +1157,133 @@ def _process_county(county_name, min_area_threshold=500, min_width_threshold=10)
   poly_gdf_cleaned = _merge_small_polygons(poly_gdf, min_area_threshold, min_width_threshold)
 
   return poly_gdf_cleaned
+
+
+def compute_kernel_stat_raster(geo_df, target_field, bandwidth, pixel_size, stat='density', output_path="output.tif"):
+  """
+  Computes a raster surface where each cell contains the local (mean or median) statistic of the target field,
+  computed over sample points (parcel centroids) that lie within a circular kernel of a specified area.
+
+  Parameters:
+    geo_df: GeoDataFrame containing parcel geometries.
+    target_field: The field name in geo_df that holds the target values (e.g. "floor_area_ratio").
+    bandwidth: A numeric value representing the area (in m²) of the kernel (e.g. 1e6 for 1 square kilometer).
+               The kernel radius is computed as: radius = sqrt(bandwidth / π).
+    pixel_size: A numeric value representing the resolution of the output raster (in meters). Each pixel is square.
+    stat: 'density' (default), 'mean', or 'median'
+    output_path: File path for the output GeoTIFF.
+
+  Returns:
+    The function writes a GeoTIFF to 'output_path' and returns the computed raster array.
+  """
+  # =========================
+  # Check and prepare the CRS
+  # =========================
+  if geo_df.crs is None:
+    raise ValueError("GeoDataFrame must have a defined CRS.")
+  # Reproject to a metric system if CRS is geographic
+
+  if geo_df.crs.is_geographic:
+    crs = get_crs(geo_df, "equal_area")
+    geo_df = geo_df.to_crs(crs)
+
+  # =========================
+  # Create sample points using parcel centroids
+  # =========================
+  geo_df["centroid"] = geo_df.geometry.centroid
+  sample_points = np.array([[pt.x, pt.y] for pt in geo_df["centroid"]])
+  sample_values = geo_df[target_field].values
+
+  # =========================
+  # Compute kernel radius from bandwidth area
+  # =========================
+  # bandwidth is assumed in m². For a circle: area = π * r² ==> r = sqrt(area/π)
+  kernel_radius = math.sqrt(bandwidth / math.pi)
+
+  # =========================
+  # Determine raster spatial extent (with a buffer to cover edge effects)
+  # =========================
+  minx = sample_points[:, 0].min()
+  maxx = sample_points[:, 0].max()
+  miny = sample_points[:, 1].min()
+  maxy = sample_points[:, 1].max()
+
+  # Add a buffer equal to the kernel radius
+  minx -= kernel_radius
+  miny -= kernel_radius
+  maxx += kernel_radius
+  maxy += kernel_radius
+
+  # Determine grid dimensions in pixels
+  width = int(np.ceil((maxx - minx) / pixel_size))
+  height = int(np.ceil((maxy - miny) / pixel_size))
+
+  # Create the affine transform. Note that the origin is at the top-left
+  transform = from_origin(minx, maxy, pixel_size, pixel_size)
+
+  # =========================
+  # Build KDTree for fast spatial queries
+  # =========================
+  tree = cKDTree(sample_points)
+
+  # =========================
+  # Initialize raster array (with NaN as nodata)
+  # =========================
+  raster_array = np.full((height, width), np.nan, dtype=np.float32)
+
+  # =========================
+  # Loop over each raster cell and compute the local statistic
+  # =========================
+
+
+  k = 0
+
+  for i in range(height):
+    # Compute the y-coordinate of the cell center (note raster rows start at the top)
+    y = maxy - (i + 0.5) * pixel_size
+    for j in range(width):
+      # Compute the x-coordinate of the cell center
+      x = minx + (j + 0.5) * pixel_size
+
+      if k % 100000 == 0:
+        max_iterations = height * width
+        perc_complete = k / max_iterations
+        print(f"({perc_complete:4.2%}) -- cell {k}/{max_iterations}")
+
+      k += 1
+
+      # Query for sample points within kernel_radius of the cell center
+      indices = tree.query_ball_point([x, y], r=kernel_radius)
+      if indices:
+        values = sample_values[indices]
+        if stat == 'density':
+          # calculate the density of the samples over space
+          # add up the samples, then divide the sum by the area of the kernel
+          raster_array[i, j] = np.sum(values) / bandwidth
+        elif stat == 'mean':
+          raster_array[i, j] = np.mean(values)
+        elif stat == 'median':
+          raster_array[i, j] = np.median(values)
+        else:
+          raise ValueError("Invalid stat option: choose 'mean' or 'median'")
+
+  # =========================
+  # Write the raster to a GeoTIFF file
+  # =========================
+  new_crs = geo_df.crs.to_string()
+  with rasterio.open(
+      output_path,
+      "w",
+      driver="GTiff",
+      height=height,
+      width=width,
+      count=1,
+      dtype=raster_array.dtype,
+      crs=new_crs,
+      transform=transform,
+      nodata=np.nan,
+  ) as dst:
+    dst.write(raster_array, 1)
+
+  print(f"Raster written to {output_path}")
+  return raster_array
