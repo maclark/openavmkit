@@ -293,10 +293,9 @@ class OvertureService:
         joined[field_name] = joined.apply(calculate_intersection_area, axis=1)
         t.stop("calc_area")
 
-        # Calculate actual intersection areas
         if verbose:
             _t = t.get("calc_area")
-            print(f"--> Calculating precise intersection areas...({_t:.2f}s)")
+            print(f"--> Calculated precise intersection areas...({_t:.2f}s)")
 
         # Aggregate total building footprint area per parcel
         t.start("agg")
@@ -305,7 +304,7 @@ class OvertureService:
 
         if verbose:
             _t = t.get("agg")
-            print(f"--> Aggregating building footprint areas...({_t:.2f}s)")
+            print(f"--> Aggregated building footprint areas...({_t:.2f}s)")
 
         t.start("finish")
         # Merge back to original dataframe
