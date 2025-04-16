@@ -555,7 +555,15 @@ def process_sales(sup: SalesUniversePair, settings: dict, verbose: bool = False)
 
    # update the SUP sales
    sup.update_sales(df_sales_enriched)
+
+   # enrich sales w/ spatial lag fields
+   sup = enrich_sup_spatial_lag(sup, settings, verbose=verbose)
+
    return sup
+
+
+def enrich_sup_spatial_lag(sup: SalesUniversePair, settings: dict, verbose: bool=False):
+   return openavmkit.data.enrich_sup_spatial_lag(sup, settings, verbose)
 
 
 def fill_unknown_values_sup(sup: SalesUniversePair, settings: dict) -> SalesUniversePair:

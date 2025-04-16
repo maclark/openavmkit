@@ -10,7 +10,7 @@ import pandas as pd
 from openavmkit.benchmark import run_one_model, MultiModelResults, _calc_benchmark, get_data_split_for, \
   run_one_hedonic_model, _optimize_ensemble, _run_ensemble, run_ensemble, _format_benchmark_df
 from openavmkit.data import SalesUniversePair, enrich_time, _perform_canonical_split, get_important_field, \
-  _basic_geo_enrichment, _enrich_sup_spatial_lag, get_hydrated_sales_from_sup, get_sale_field
+  _basic_geo_enrichment, enrich_sup_spatial_lag, get_hydrated_sales_from_sup, get_sale_field
 from openavmkit.horizontal_equity_study import mark_horizontal_equity_clusters
 from openavmkit.modeling import SingleModelResults, LandPredictionResults
 from openavmkit.synthetic.synthetic import make_geo_blocks
@@ -70,7 +70,7 @@ def trial_simple_plane(params: dict):
   sup = SalesUniversePair(df_sales, df_univ)
 
   # Enrich with spatial lag
-  sup = _enrich_sup_spatial_lag(sup, {})
+  sup = enrich_sup_spatial_lag(sup, {})
 
   return sup
 
@@ -146,7 +146,7 @@ def trial_simple_plane_w_buildings(params: dict):
   sup = SalesUniversePair(df_sales, df_univ)
 
   # Enrich with spatial lag
-  sup = _enrich_sup_spatial_lag(sup, {})
+  sup = enrich_sup_spatial_lag(sup, {})
 
   return sup
 
