@@ -604,17 +604,19 @@ def enrich_data(sup: SalesUniversePair, s_enrich: dict, dataframes: dict[str, pd
 
     if s_enrich_local is not None:
       # Handle Census enrichment for universe if enabled
-      if supkey == "universe" and "census" in s_enrich_local:
-        df = _enrich_df_census(df, s_enrich_local.get("census", {}), verbose=verbose)
+      if supkey == "universe":
+        df = _basic_geo_enrichment(df, settings, verbose=verbose)
+        df = _enrich_df_geometry(df, s_enrich_local, dataframes, settings, verbose=verbose)
+        if "census" in s_enrich_local:
+          df = _enrich_df_census(df, s_enrich_local.get("census", {}), verbose=verbose)
+        if "openstreetmap" in s_enrich_local:
+          df = _enrich_df_openstreetmap(df, s_enrich_local.get("openstreetmap", {}), s_enrich_local, dataframes, verbose=verbose, use_cache = False)
 
-      # Handle OpenStreetMap enrichment for universe if enabled
-      if supkey == "universe" and "openstreetmap" in s_enrich_local:
-        df = _enrich_df_openstreetmap(df, s_enrich_local.get("openstreetmap", {}), s_enrich_local, dataframes, verbose=verbose, use_cache = False)
-
-      df = _enrich_df_geometry(df, s_enrich_local, dataframes, settings, supkey == "sales", verbose=verbose)
       df = _enrich_df_basic(df, s_enrich_local, dataframes, settings, supkey == "sales", verbose=verbose)
 
-      if supkey == "universe":
+      # if supkey == "universe":
+      #   # enrich universe spatial lag fields
+      #   df = _enrich_universe_spatial_lag(df, settings, verbose=verbose)
 
     # stuff to enrich whether the user has settings or not
     df = _enrich_vacant(df, settings)
@@ -1235,7 +1237,7 @@ def _enrich_vacant(df_in: pd.DataFrame, settings:dict) -> pd.DataFrame:
   return df
 
 
-def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: dict[str, pd.DataFrame], settings: dict, is_sales: bool, verbose: bool = False) -> gpd.GeoDataFrame:
+def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: dict[str, pd.DataFrame], settings: dict, verbose: bool = False) -> gpd.GeoDataFrame:
   """
   Enrich a DataFrame with spatial information using spatial joins and distance calculations.
 
@@ -1247,8 +1249,6 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
   :type dataframes: dict[str, pd.DataFrame]
   :param settings: Settings dictionary.
   :type settings: dict
-  :param is_sales: If True, indicates sales data.
-  :type is_sales: bool
   :param verbose: If True, prints progress.
   :type verbose: bool, optional
   :returns: A GeoDataFrame enriched with spatial information.
@@ -1288,8 +1288,7 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
   #gdf_merged = _basic_geo_enrichment(gdf_merged, settings, verbose=verbose)
 
   # spatially infer missing
-  if not is_sales:
-    gdf_merged = perform_spatial_inference(gdf_merged, s_infer, "key", verbose=verbose)
+  gdf_merged = perform_spatial_inference(gdf_merged, s_infer, "key", verbose=verbose)
 
   return gdf_merged
 
