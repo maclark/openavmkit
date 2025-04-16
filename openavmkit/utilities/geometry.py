@@ -10,6 +10,8 @@ from geopy.distance import distance
 from pyproj import CRS
 from shapely import Polygon, MultiPolygon, LineString
 
+from openavmkit.utilities.timing import TimingData
+
 
 def get_crs(gdf, projection_type):
   """
@@ -504,27 +506,43 @@ def identify_irregular_parcels(gdf, verbose=False, tolerance=10, complex_thresho
   if verbose:
     print(f"--> identifying irregular parcels...")
 
+  t = TimingData()
+  t.start("all")
+  t.start("setup")
   old_crs = gdf.crs
   if gdf.crs.is_geographic:
     gdf = gdf.to_crs("EPSG:3857")
   gdf["simplified_geometry"] = gdf.geometry.simplify(tolerance, preserve_topology=True)
+  t.stop("setup")
 
-  if verbose:
-    print(f"--> identifying triangular parcels...")
+  t.start("tri")
   gdf["is_geom_triangular"] = gdf["simplified_geometry"].apply(detect_triangular_lots)
-
+  t.stop("tri")
   if verbose:
-    print(f"--> identifying complex geometry...")
+    _t = t.get("setup")
+    print(f"----> simplified geometry...({_t:.2f}s)")
+    _t = t.get("tri")
+    print(f"----> identified triangular parcels...({_t:.2f}s)")
+
   # Detect complex geometry based on rectangularity and vertex count
+  t.start("complex")
   gdf["geom_vertices"] = gdf["simplified_geometry"].apply(
     lambda geom: len(geom.exterior.coords) if geom.geom_type == "Polygon" else 0
   )
   gdf["is_geom_complex"] = (gdf["geom_vertices"].ge(complex_threshold)) & (gdf["geom_rectangularity_num"].le(rectangularity_threshold))
-
+  t.stop("complex")
   if verbose:
-    print(f"--> identifying elongated parcels...")
-  gdf["is_geom_elongated"] = gdf["geom_aspect_ratio"].ge(elongation_threshold)
+    _t = t.get("complex")
+    print(f"----> identified complex geometry...({_t:.2f}s)")
 
+  t.start("long")
+  gdf["is_geom_elongated"] = gdf["geom_aspect_ratio"].ge(elongation_threshold)
+  t.stop("long")
+  if verbose:
+    _t = t.get("long")
+    print(f"----> identified elongated parcels...({_t:.2f}s)")
+
+  t.start("finish")
   # Combine criteria for irregular lots
   gdf["is_geom_irregular"] = (
       gdf["is_geom_complex"] |
@@ -539,6 +557,14 @@ def identify_irregular_parcels(gdf, verbose=False, tolerance=10, complex_thresho
 
   gdf = gdf.drop(columns="simplified_geometry")
   gdf = gdf.to_crs(old_crs)
+  t.stop("finish")
+  if verbose:
+    _t = t.get("finish")
+    print(f"----> finished up...({_t:.2f}s)")
+  t.stop("all")
+  if verbose:
+    _t = t.get("all")
+    print(f"--> identified irregular parcels (total)...({_t:.2f}s)")
 
   return gdf
 
