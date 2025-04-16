@@ -352,6 +352,11 @@ def calc_correlations(X: pd.DataFrame, threshold: float = 0.1, do_plots: bool = 
 	X = X.copy()
 	first_run = None
 
+	# Normalize all numerical values prior to computation:
+	for col in X.columns:
+		if X[col].dtype != "object":
+			X[col] = (X[col] - X[col].mean()) / X[col].std()
+
 	while True:
 		# Compute the correlation matrix
 		naive_corr = X.corr()
