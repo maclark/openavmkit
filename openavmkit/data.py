@@ -2153,11 +2153,27 @@ def _handle_duplicated_rows(df_in: pd.DataFrame, dupes: str|dict, verbose: bool 
     if key not in df_in:
       return df_in
   do_drop = dupes.get("drop", True)
+  agg : dict | None = dupes.get("agg", None)
   num_dupes = df_in.duplicated(subset=subset).sum()
   orig_len = len(df_in)
   if num_dupes > 0:
-    sort_by = dupes.get("sort_by", ["key", "asc"])
-    if not isinstance(sort_by, list):
+    if agg is not None:
+      df_agg : pd.DataFrame | None = None
+      for agg_entry in agg:
+        field = agg_entry.get("field")
+        op = agg_entry.get("op")
+        alias = agg_entry.get("alias", f"{field}_{op}")
+        if field not in df_in:
+          raise ValueError(f"Field '{field}' not found in DataFrame.")
+        df_result = df_in.groupby(subset).agg({field: op}).reset_index().rename(columns={field: alias})
+        if df_agg is None:
+          df_agg = df_result
+        else:
+          df_agg = df_agg.merge(df_result, on=subset, how="outer")
+      return df_agg
+    else:
+      sort_by = dupes.get("sort_by", ["key", "asc"])
+      if not isinstance(sort_by, list):
       raise ValueError("sort_by must be a list of string pairs of the form [<field_name>, <asc|desc>]")
     if len(sort_by) == 2:
       if isinstance(sort_by[0], str) and isinstance(sort_by[1], str):
