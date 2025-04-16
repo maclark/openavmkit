@@ -5,10 +5,13 @@ import pandas as pd
 import tempfile
 from pathlib import Path
 import traceback
-import subprocess
-import sys
-import shutil
-import site
+import io
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.dataset as ds
+import pyarrow.fs as fs
+from tqdm import tqdm
+import shapely.wkb
 
 from openavmkit.utilities.geometry import get_crs
 from openavmkit.utilities.timing import TimingData
@@ -24,30 +27,43 @@ class OvertureService:
             warnings.warn("No Overture settings found in settings dictionary")
         self.cache_dir = "cache/overture"
         os.makedirs(self.cache_dir, exist_ok=True)
-
-
-    def _find_overturemaps_executable(self):
-        """Find the overturemaps executable in the current Python environment."""
-        # First try the scripts directory of the current environment
-        venv_scripts = os.path.join(sys.prefix, 'bin')
-        overturemaps_path = os.path.join(venv_scripts, 'overturemaps')
         
-        if os.path.exists(overturemaps_path):
-            return overturemaps_path
-            
-        # Try user site-packages bin directory
-        user_scripts = os.path.join(site.USER_BASE, 'bin')
-        overturemaps_path = os.path.join(user_scripts, 'overturemaps')
+        # Initialize S3 filesystem
+        self.fs = fs.S3FileSystem(anonymous=True, region="us-west-2")
+        self.bucket = 'overturemaps-us-west-2'
+        self.prefix = 'release/2025-03-19.0/theme=buildings/type=building/'
+
+    def _get_cache_path(self, cache_type: str, bbox: tuple) -> str:
+        """Get the cache path for a given type and bounding box."""
+        cache_key = f"{cache_type}_{bbox[0]}_{bbox[1]}_{bbox[2]}_{bbox[3]}"
+        return os.path.join(self.cache_dir, f"{cache_key}.parquet")
+
+    def _get_dataset(self):
+        """Get the PyArrow dataset for buildings."""
+        path = f"{self.bucket}/{self.prefix}"
+        return ds.dataset(path, filesystem=self.fs)
+
+    def _geoarrow_schema_adapter(self, schema: pa.Schema) -> pa.Schema:
+        """
+        Convert a geoarrow-compatible schema to a proper geoarrow schema
+        """
+        geometry_field_index = schema.get_field_index("geometry")
+        geometry_field = schema.field(geometry_field_index)
+        geoarrow_geometry_field = geometry_field.with_metadata(
+            {b"ARROW:extension:name": b"geoarrow.wkb"}
+        )
+        return schema.set(geometry_field_index, geoarrow_geometry_field)
+
+    def _batch_to_geodataframe(self, batch: pa.RecordBatch) -> gpd.GeoDataFrame:
+        """Convert a PyArrow batch to a GeoDataFrame with proper geometry handling."""
+        # Convert to pandas DataFrame first
+        df = batch.to_pandas()
         
-        if os.path.exists(overturemaps_path):
-            return overturemaps_path
-            
-        # Try which as a last resort
-        overturemaps_path = shutil.which('overturemaps')
-        if overturemaps_path:
-            return overturemaps_path
-            
-        raise RuntimeError("Could not find overturemaps executable")
+        # Convert WKB geometry to shapely geometry
+        df['geometry'] = df['geometry'].apply(shapely.wkb.loads)
+        
+        # Create GeoDataFrame with WGS84 CRS (EPSG:4326)
+        return gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
 
     def get_buildings(self, bbox, use_cache=True, verbose=False):
         """
@@ -79,106 +95,97 @@ class OvertureService:
             if verbose:
                 print(f"--> Bounding box: {bbox}")
 
-            # Create cache signature
-            cache_key = f"buildings_{bbox[0]}_{bbox[1]}_{bbox[2]}_{bbox[3]}"
-            cache_path = os.path.join(self.cache_dir, f"{cache_key}.parquet")
+            # Get cache path for buildings
+            cache_path = self._get_cache_path("buildings", bbox)
 
             # Check cache
             if use_cache and os.path.exists(cache_path):
                 if verbose:
-                    print(f"--> Loading from cache: {cache_path}")
+                    print(f"--> Loading buildings from cache: {cache_path}")
                 return gpd.read_parquet(cache_path)
 
             if verbose:
                 print("--> Fetching data from Overture...")
 
             try:
-                # Create a temporary file for the GeoParquet output
-                with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as tmp_file:
-                    temp_path = tmp_file.name
-
-                # Format bbox string
-                bbox_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
-                
-                if verbose:
-                    print("--> Running overturemaps CLI...")
-
-                # TODO: Replace this with a cross-platform solution that doesn't download an EXE
-                # Find the overturemaps executable
-                overturemaps_path = self._find_overturemaps_executable()
-                if verbose:
-                    print(f"--> Found overturemaps at: {overturemaps_path}")
-                
-                # Construct the command
-                cmd = [
-                    overturemaps_path,
-                    "download",
-                    "--bbox", bbox_str,
-                    "-f", "geoparquet",
-                    "--type", "building",
-                    "-o", temp_path
-                ]
-                
-                if verbose:
-                    print(f"--> Command: {' '.join(cmd)}")
-                
-                # Run the command
-                env = os.environ.copy()
-                env["PYTHONPATH"] = os.pathsep.join(sys.path)  # Ensure Python can find all packages
-                
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,  # This will raise CalledProcessError if command fails
-                    env=env
+                # Create bounding box filter
+                xmin, ymin, xmax, ymax = bbox
+                filter = (
+                    (pc.field("bbox", "xmin") < xmax)
+                    & (pc.field("bbox", "xmax") > xmin)
+                    & (pc.field("bbox", "ymin") < ymax)
+                    & (pc.field("bbox", "ymax") > ymin)
                 )
+
+                # Get dataset and apply filter
+                dataset = self._get_dataset()
+                batches = dataset.to_batches(filter=filter)
                 
-                if verbose and result.stdout:
-                    print(f"--> Command output: {result.stdout}")
-                
+                # Count total batches for progress bar
                 if verbose:
-                    print("--> Reading GeoParquet file...")
+                    print("--> Counting batches...")
+                    total_batches = sum(1 for _ in batches)
+                    print(f"--> Found {total_batches} batches")
+                    batches = dataset.to_batches(filter=filter)  # Reset iterator
+
+                # Process batches with progress bar
+                dfs = []
+                buildings_found = 0
                 
-                # Read the GeoParquet file
-                gdf = gpd.read_parquet(temp_path)
-                
+                with tqdm(total=total_batches if verbose else None, 
+                         desc="Processing batches", 
+                         disable=not verbose) as pbar:
+                    for batch in batches:
+                        if batch.num_rows > 0:
+                            try:
+                                # Convert batch to GeoDataFrame with proper geometry handling
+                                df = self._batch_to_geodataframe(batch)
+                                if not df.empty:
+                                    dfs.append(df)
+                                    buildings_found += len(df)
+                            except Exception as e:
+                                if verbose:
+                                    print(f"--> Error processing batch: {str(e)}")
+                        pbar.update(1)
+
                 if verbose:
-                    print(f"--> Found {len(gdf)} buildings")
-                    if len(gdf) > 0:
-                        print(f"--> Available columns: {gdf.columns.tolist()}")
-                
+                    print(f"--> Found {buildings_found} buildings")
+
+                if not dfs:
+                    if verbose:
+                        print("--> No buildings found in the area")
+                    return gpd.GeoDataFrame()
+
+                # Combine all dataframes
+                gdf = pd.concat(dfs, ignore_index=True)
+
+                if verbose:
+                    print(f"--> Available columns: {gdf.columns.tolist()}")
+
                 if not gdf.empty:
                     # Calculate footprint areas
                     t.start("area")
                     gdf["bldg_area_footprint_sqft"] = gdf.to_crs(gdf.estimate_utm_crs()).area * 10.764  # Convert m² to ft²
                     t.stop("area")
                     if verbose:
-                        _t = t.get("area")
-                        print(f"--> Calculated building footprint areas...({_t:.2f}s)")
+                        print("--> Calculating building footprint areas...")
+                    # Get UTM CRS for the area
+                    utm_crs = gdf.estimate_utm_crs()
+                    if verbose:
+                        print(f"--> Using UTM CRS: {utm_crs}")
+                    # Convert to UTM and calculate areas
+                    gdf["bldg_area_footprint_sqft"] = gdf.to_crs(utm_crs).area * 10.764  # Convert m² to ft²
 
                     if use_cache:
                         t.start("save")
                         gdf.to_parquet(cache_path)
                         t.stop("save")
                         if verbose:
-                            _t = t.get("save")
-                            print(f"--> Saving to cache: {cache_path}...({_t:.2f}s)")
-
-
-                # Clean up temporary file
-                try:
-                    os.unlink(temp_path)
-                except:
-                    pass
+                            print(f"--> Saving buildings to cache: {cache_path}")
+                        gdf.to_parquet(cache_path)
 
                 return gdf
 
-            except subprocess.CalledProcessError as e:
-                if verbose:
-                    print(f"--> CLI command failed with error: {e.stderr}")
-                    print(f"--> Command output: {e.stdout}")
-                raise
             except Exception as e:
                 if verbose:
                     print(f"--> Failed to fetch Overture data: {str(e)}")
@@ -228,6 +235,15 @@ class OvertureService:
             raise ValueError(f"Unsupported units: {desired_units}. Supported units are 'sqft' and 'sqm'.")
 
         t.start("crs")
+        # Get cache path for intersection areas
+        cache_path = self._get_cache_path("intersections", gdf.total_bounds)
+        
+        # Check cache
+        if os.path.exists(cache_path):
+            if verbose:
+                print(f"--> Loading intersection areas from cache: {cache_path}")
+            return gpd.read_parquet(cache_path)
+
         # Convert both to same CRS for spatial operations
         buildings = buildings.to_crs(gdf.crs)
         
@@ -311,6 +327,11 @@ class OvertureService:
             print(f"--> Total building footprint area: {gdf[field_name].sum():,.0f} sqft")
             print(f"--> Average building footprint area: {gdf[field_name].mean():,.0f} sqft")
             print(f"--> Number of parcels with buildings: {(gdf[field_name] > 0).sum():,}")
+            
+        # Save to cache
+        if verbose:
+            print(f"--> Saving intersection areas to cache: {cache_path}")
+        gdf.to_parquet(cache_path)
             
         return gdf
 
