@@ -207,32 +207,32 @@ def try_variables(
 			# i = 1
 			# for var in best_vars:
 			# 	print(f"{i}. {var}")
-				for var in results["variable"].unique():
-					if var in df_hydrated.columns:
-						# do a correlation scatter plot of the variable vs. the dependent variable (sale_field):
-						df_sub = df_hydrated[
-							df_hydrated["model_group"].eq(model_group) &
-							df_hydrated[var].notna() &
-							df_hydrated[sale_field].notna()
-						]
+			for var in results["variable"].unique():
+				if var in df_hydrated.columns:
+					# do a correlation scatter plot of the variable vs. the dependent variable (sale_field):
+					df_sub = df_hydrated[
+						df_hydrated["model_group"].eq(model_group) &
+						df_hydrated[var].notna() &
+						df_hydrated[sale_field].notna()
+					]
 
-						for status in ["vacant", "improved"]:
-							# clear any previous plots with plt:
-							plt.clf()
+					for status in ["vacant", "improved"]:
+						# clear any previous plots with plt:
+						plt.clf()
 
-							if status == "vacant":
-								df_sub2 = df_sub[df_sub["vacant_sale"].eq(True)]
-							else:
-								df_sub2 = df_sub[df_sub["vacant_sale"].eq(False)]
+						if status == "vacant":
+							df_sub2 = df_sub[df_sub["vacant_sale"].eq(True)]
+						else:
+							df_sub2 = df_sub[df_sub["vacant_sale"].eq(False)]
 
-							if len(df_sub2) > 0:
-								# do a scatter plot of the variable vs. the dependent variable (sale_field):
-								df_sub2.plot.scatter(x=var, y=sale_field)
-								# labels
-								plt.xlabel(var)
-								plt.ylabel(sale_field)
-								plt.title(f"'{var}' vs '{sale_field}' ({status} only)")
-								plt.show()
+						if len(df_sub2) > 0:
+							# do a scatter plot of the variable vs. the dependent variable (sale_field):
+							df_sub2.plot.scatter(x=var, y=sale_field)
+							# labels
+							plt.xlabel(var)
+							plt.ylabel(sale_field)
+							plt.title(f"'{var}' vs '{sale_field}' ({status} only)")
+							plt.show()
 
 
 
