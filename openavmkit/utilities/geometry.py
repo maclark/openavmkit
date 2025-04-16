@@ -532,6 +532,11 @@ def identify_irregular_parcels(gdf, verbose=False, tolerance=10, complex_thresho
       gdf["is_geom_triangular"]
   )
 
+  # Fill any NA values with false:
+  for field in ["is_geom_complex", "is_geom_elongated", "is_geom_triangular", "is_geom_irregular"]:
+    gdf[field] = gdf[field].fillna(False)
+    gdf[field] = gdf[field].astype(bool)
+
   gdf = gdf.drop(columns="simplified_geometry")
   gdf = gdf.to_crs(old_crs)
 
