@@ -2109,6 +2109,10 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
     gdf = clean_geometry(gdf, ensure_polygon=True)
     df = gdf
 
+  drop = entry.get("drop", [])
+  if len(drop) > 0:
+    df = df.drop(columns=drop, errors="ignore")
+
   return df
 
 
