@@ -2263,8 +2263,10 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
 
   # Generate suffixes and note conflicts, which we'll resolve further down
   for merge in merges:
+    df_id = merge["id"]
     df = merge["df"]
     on = merge["on"]
+    how = merge["how"]
     left_on = merge["left_on"]
     right_on = merge["right_on"]
     merge_keys = []
@@ -2272,7 +2274,9 @@ def _merge_dict_of_dfs(dataframes: dict[str, pd.DataFrame], merge_list: list, se
       merge_keys = [on] if not isinstance(on, list) else on
     if right_on is not None:
       merge_keys = right_on if isinstance(right_on, list) else [right_on]
-    
+    if how == "lat_long":
+      merge_keys = ["latitude", "longitude"]
+
     suffixes = {}
     for col in df.columns.values:
       if col in merge_keys:
