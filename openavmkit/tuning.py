@@ -354,6 +354,24 @@ def _catboost_rolling_origin_cv(X, y, params, n_splits=5, random_state=42, cat_v
 
         _cat_vars_train = [var for var in cat_vars if var in X_train.columns.values]
         _cat_vars_val = [var for var in cat_vars if var in X_val.columns.values]
+
+        # scan categorical variables, look for any that contain NaN or floating-point values:
+        for var in _cat_vars_train:
+            dtype = X_train[var].dtype
+            if dtype == "float64" or dtype == "float32":
+                raise ValueError(f"Categorical variable '{var}' contains floating-point values. Please convert to integer or string.")
+            if X_train[var].isnull().any():
+                raise ValueError(f"Categorical variable '{var}' contains NaN values. Please handle them before training.")
+            if X_val[var].isnull().any():
+                raise ValueError(f"Categorical variable '{var}' contains NaN values in validation set. Please handle them before training.")
+            if dtype == "object":
+                # check if any values in this field are non-integer (real) numbers:
+                if not X_train[var].apply(lambda x: isinstance(x, (int, str))).all():
+                    raise ValueError(f"Categorical variable '{var}' contains non-integer values. Please convert to integer or string.")
+                if not X_val[var].apply(lambda x: isinstance(x, (int, str))).all():
+                    raise ValueError(f"Categorical variable '{var}' contains non-integer values in validation set. Please convert to integer or string.")
+
+
         train_pool = Pool(X_train, y_train, cat_features=_cat_vars_train)
         val_pool = Pool(X_val, y_val, cat_features=_cat_vars_val)
 
