@@ -773,14 +773,16 @@ def read_pickle(path: str):
 def try_variables(
     sup: SalesUniversePair,
     settings: dict,
-    verbose: bool = False
+    verbose: bool = False,
+    plot: bool = False
 ):
 
    sup = fill_unknown_values_sup(sup, settings)
    openavmkit.benchmark.try_variables(
       sup,
       settings,
-      verbose
+      verbose,
+      plot
    )
 
 

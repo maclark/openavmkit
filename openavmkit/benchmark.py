@@ -1,7 +1,7 @@
 import os
 import pickle
 import warnings
-
+from matplotlib import pyplot as plt
 import pandas as pd
 from catboost import CatBoostRegressor
 from lightgbm import Booster
@@ -10,7 +10,7 @@ from xgboost import XGBRegressor
 from IPython.display import display
 
 from openavmkit.data import get_important_field, get_locations, _read_split_keys, SalesUniversePair, \
-	get_hydrated_sales_from_sup, get_report_locations, get_sales, get_sale_field
+	get_hydrated_sales_from_sup, get_report_locations, get_sales, get_sale_field, simulate_removed_buildings
 from openavmkit.modeling import run_mra, run_gwr, run_xgboost, run_lightgbm, run_catboost, SingleModelResults, \
 	run_garbage, run_average, run_naive_sqft, predict_garbage, \
 	run_kernel, run_local_sqft, run_pass_through, predict_average, predict_naive_sqft, predict_local_sqft, \
@@ -129,7 +129,8 @@ class MultiModelResults:
 def try_variables(
 		sup: SalesUniversePair,
 		settings: dict,
-		verbose: bool = False
+		verbose: bool = False,
+		plot: bool = False
 ):
 
 	df_hydrated = get_hydrated_sales_from_sup(sup)
@@ -166,6 +167,7 @@ def try_variables(
 				raise ValueError("No variables defined. Please check settings `modeling.experiment.variables`")
 
 			df_univ = df_univ[df_univ["model_group"].eq(model_group)].copy()
+
 			var_recs = get_variable_recommendations(
 				df_in,
 				df_univ,
@@ -190,6 +192,7 @@ def try_variables(
 
 	do_per_model_group(df_hydrated, settings, _try_variables, params={"settings": settings, "df_univ": sup.universe, "outpath":base_path, "verbose": verbose, "results": all_best_variables}, key="key_sale")
 
+	sale_field = get_sale_field(settings)
 
 	print("")
 	print("********** BEST VARIABLES ***********")
@@ -204,9 +207,32 @@ def try_variables(
 			# i = 1
 			# for var in best_vars:
 			# 	print(f"{i}. {var}")
-			# 	if var not in variables_used:
-			# 		variables_used.append(var)
-			# 	i += 1
+				for var in results["variable"].unique():
+					if var in df_hydrated.columns:
+						# do a correlation scatter plot of the variable vs. the dependent variable (sale_field):
+						df_sub = df_hydrated[
+							df_hydrated["model_group"].eq(model_group) &
+							df_hydrated[var].notna() &
+							df_hydrated[sale_field].notna()
+						]
+
+						for status in ["vacant", "improved"]:
+							# clear any previous plots with plt:
+							plt.clf()
+
+							if status == "vacant":
+								df_sub2 = df_sub[df_sub["vacant_sale"].eq(True)]
+							else:
+								df_sub2 = df_sub[df_sub["vacant_sale"].eq(False)]
+
+							if len(df_sub2) > 0:
+								# do a scatter plot of the variable vs. the dependent variable (sale_field):
+								df_sub2.plot.scatter(x=var, y=sale_field)
+								# labels
+								plt.xlabel(var)
+								plt.ylabel(sale_field)
+								plt.title(f"'{var}' vs '{sale_field}' ({status} only)")
+								plt.show()
 
 
 
