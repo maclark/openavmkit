@@ -135,6 +135,17 @@ def try_variables(
 
 	df_hydrated = get_hydrated_sales_from_sup(sup)
 
+	#df_hydrated = df_hydrated[df_hydrated["sale_price_time_adj"].lt(1000000)]
+
+	idx_vacant = df_hydrated["vacant_sale"].eq(True)
+
+	df_vacant = df_hydrated[idx_vacant].copy()
+
+	df_vacant = simulate_removed_buildings(df_vacant, settings, idx_vacant)
+
+	# update df_hydrated with *all* the characteristics of df_vacant where their keys match:
+	df_hydrated.update(df_vacant)
+
 	all_best_variables = {}
 	base_path = "out/reports"
 
