@@ -262,6 +262,8 @@ def fill_unknown_values_sup(sup: SalesUniversePair, settings: dict):
 
 
 def _fill_with(df: pd.DataFrame, field: str, value):
+	if field not in df:
+		return df
 	df.loc[df[field].isna(), field] = value
 	return df
 
@@ -334,19 +336,22 @@ def _fill_unknown_values(df, settings: dict):
 	for key in fills:
 		fill_list = fills[key]
 		for field in fill_list:
-			if field not in df:
+			field_name = field
+			if type(field) is dict:
+				field_name = field.get("field")
+			if field_name not in df:
 				continue
 			fill_method = key
 			if key.endswith("_impr"):
 				fill_method = key[:-5]
 				df_impr = df[df["is_vacant"].eq(False)].copy()
 				df_impr = _fill_thing(df_impr, field, fill_method)
-				df.loc[df_impr.index, field] = df_impr[field]
+				df.loc[df_impr.index, field_name] = df_impr[field_name]
 			elif key.endswith("_vacant"):
 				fill_method = key[:-7]
 				df_vacant = df[df["is_vacant"].eq(True)].copy()
 				df_vacant = _fill_thing(df_vacant, field, fill_method)
-				df.loc[df_vacant.index, field] = df_vacant[field]
+				df.loc[df_vacant.index, field_name] = df_vacant[field_name]
 			else:
 				df = _fill_thing(df, field, fill_method)
 
