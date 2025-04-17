@@ -134,8 +134,8 @@ def test_cache_df():
 
   expected = {
     "key": [1, 2, 3],
-    "fruit": ["apple", "banana", "cherry"],
-    "quantity": [10, 20, 30],
+    "fruit": ["snapple", "banana", "cherry"],
+    "quantity": [10, 20, 36],
     "price": [0.5, 0.25, 0.75],
     "calories": [52, 89, 50],
     "score": [0.8, 0.9, 0.7],
@@ -152,6 +152,9 @@ def test_cache_df():
     _df["calories"] = [52, 89, 50]
     _df["score"] = [0.8, 0.9, 0.7]
     _df["awesomeness"] = [0.9, 0.95, 0.85]
+
+    _df.loc[_df["key"].eq(1), "fruit"] = "snapple"
+    _df.loc[_df["key"].eq(3), "quantity"] = 36
 
     write_cached_df(df_in, _df, "fruit", "key")
     return _df, "uncached"

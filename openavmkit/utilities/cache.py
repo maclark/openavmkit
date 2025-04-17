@@ -3,7 +3,7 @@ import json
 import pandas as pd
 import geopandas as gpd
 
-from openavmkit.utilities.assertions import objects_are_equal, dicts_are_equal
+from openavmkit.utilities.assertions import objects_are_equal, dicts_are_equal, dfs_are_equal
 from openavmkit.utilities.geometry import ensure_geometries
 
 
@@ -100,20 +100,37 @@ def write_cached_df(
     filename: str,
     key: str = "key",
     extra_signature: dict | str = None
-)-> bool:
+)-> pd.DataFrame | None:
 
-  new_cols = [col for col in df_new.columns if col not in df_orig.columns]
-  if len(new_cols) == 0:
-    return False
+  orig_cols = set(df_orig.columns)
+  new_cols  = [c for c in df_new.columns if c not in orig_cols]
+  common    = [c for c in df_new.columns if c in orig_cols]
 
-  df_diff = df_new[[key]+new_cols].copy()
+  modified = []
+  for c in common:
+    # nan‑safe check: True if ANY value differs
+    neq = ~(df_new[c].eq(df_orig[c]) | (df_new[c].isna() & df_orig[c].isna()))
+    if neq.any():
+      modified.append(c)
+
+  changed_cols = new_cols + modified
+  if not changed_cols:
+    # nothing new or modified → no cache update needed
+    return
+
+  df_diff = df_new[[key]+changed_cols].copy()
 
   signature = _get_df_signature(df_orig, extra_signature)
 
   df_type = "df"
 
   write_cache(filename, df_diff, signature, df_type)
-  return True
+
+  df_cached = get_cached_df(df_orig, filename, key, extra_signature)
+
+  assert dfs_are_equal(df_new, df_cached)
+
+  return df_cached
 
 def get_cached_df(
     df: pd.DataFrame,
@@ -124,10 +141,17 @@ def get_cached_df(
   signature = _get_df_signature(df, extra_signature)
 
   if check_cache(filename, signature, "df"):
-    df_cache = read_cache(filename, "df")
-    if df_cache is not None:
-      df_result = df.merge(df_cache, how="left", on=key)
-      return df_result
+    df_diff = read_cache(filename, "df")
+    if df_diff is None or df_diff.empty:
+      return None
+
+    df_diff[key] = df_diff[key].astype(df[key].dtype)
+
+    cols_to_replace = [c for c in df_diff.columns if c != key]
+    df_base = df.drop(columns=cols_to_replace, errors="ignore")
+
+    return df_base.merge(df_diff, how="left", on=key)
+
   return None
 
 

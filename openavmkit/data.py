@@ -18,6 +18,7 @@ import traceback
 
 from openavmkit.calculations import _crawl_calc_dict_for_fields, perform_calculations, perform_tweaks
 from openavmkit.filters import resolve_filter, select_filter
+from openavmkit.utilities.assertions import dfs_are_equal
 from openavmkit.utilities.cache import check_cache, write_cache, read_cache, get_cached_df, write_cached_df
 from openavmkit.utilities.data import combine_dfs, div_field_z_safe, merge_and_stomp_dfs
 from openavmkit.utilities.geometry import get_crs, clean_geometry, identify_irregular_parcels, get_exterior_coords, \
@@ -644,7 +645,14 @@ def _enrich_df_census(df_in: pd.DataFrame | gpd.GeoDataFrame, census_settings: d
   if not census_settings.get("enabled", False):
     return df_in
 
-  df_out = get_cached_df(df_in, "census", "key")
+  if verbose:
+    print("Enriching with Census data...")
+
+  df_out = get_cached_df(df_in, "census", "key", census_settings)
+  if df_out is not None:
+    if verbose:
+      print("--> found cached data")
+    return df_out
 
   df = df_in.copy()
 
@@ -696,13 +704,15 @@ def _enrich_df_census(df_in: pd.DataFrame | gpd.GeoDataFrame, census_settings: d
       join_type="left"
     )
 
+    write_cached_df(df_in, df, "census", "key", census_settings)
+
     return df
 
   except Exception as e:
     warnings.warn(f"Failed to enrich with Census data: {str(e)}")
     return df
 
-def _enrich_df_openstreetmap(df: pd.DataFrame | gpd.GeoDataFrame, osm_settings: dict, s_enrich_this: dict, dataframes: dict, verbose: bool = False, use_cache: bool = False) -> pd.DataFrame | gpd.GeoDataFrame:
+def _enrich_df_openstreetmap(df_in: pd.DataFrame | gpd.GeoDataFrame, osm_settings: dict, s_enrich_this: dict, dataframes: dict, verbose: bool = False, use_cache: bool = False) -> pd.DataFrame | gpd.GeoDataFrame:
     """
     Enrich a DataFrame with OpenStreetMap data.
     
@@ -717,6 +727,16 @@ def _enrich_df_openstreetmap(df: pd.DataFrame | gpd.GeoDataFrame, osm_settings: 
     Returns:
         pd.DataFrame | gpd.GeoDataFrame: DataFrame enriched with OpenStreetMap data
     """
+
+    df = df_in.copy()
+
+    if verbose:
+        print("Enriching with OpenStreetMap data...")
+
+    df_out = get_cached_df(df, "osm/all", "key", osm_settings)
+    if df_out is not None:
+      return df_out
+
     try:
         if not osm_settings.get('enabled', False):
             if verbose:
@@ -843,7 +863,9 @@ def _enrich_df_openstreetmap(df: pd.DataFrame | gpd.GeoDataFrame, osm_settings: 
         # Add the distances configuration to the enrichment settings
         if distances:
             s_enrich_this['distances'] = distances
-            
+
+        write_cached_df(df_in, df, "osm/all", "key", osm_settings)
+
         return df
         
     except Exception as e:
@@ -1162,8 +1184,8 @@ def enrich_sup_spatial_lag(sup: SalesUniversePair, settings: dict, verbose: bool
       continue
 
     df_sub = df_sub[
-      ~df_sub["latitude"].isna() &
-      ~df_sub["longitude"].isna()
+      ~pd.isna(df_sub["latitude"]) &
+      ~pd.isna(df_sub["longitude"])
     ]
 
     # Build a cKDTree from df_sales coordinates
@@ -1175,6 +1197,10 @@ def enrich_sup_spatial_lag(sup: SalesUniversePair, settings: dict, verbose: bool
 
     # Get the coordinates for the universe parcels
     universe_coords = df_universe[['latitude', 'longitude']].values
+
+    # count any NA coordinates in the universe
+    n_na_coords = universe_coords.shape[0] - np.count_nonzero(pd.isna(universe_coords).any(axis=1))
+    print(f"Number of parcels in universe with coordinates: {n_na_coords} / {universe_coords.shape[0]}")
 
     # Query the tree: for each parcel in df_universe, find the k nearest sales
     # distances: shape (n_universe, k); indices: corresponding indices in df_sales
@@ -1331,11 +1357,18 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
   :returns: GeoDataFrame with enriched spatial features.
   :rtype: geopandas.GeoDataFrame
   """
+
   df = df_in.copy()
   s_geom = s_enrich_this.get("geometry", [])
   s_dist = s_enrich_this.get("distances", {})
   s_infer = s_enrich_this.get("infer", {})
   s_overture = s_enrich_this.get("overture", {})
+
+  gdf_out = get_cached_df(df_in, "geom/enrich", "key", s_enrich_this)
+  if gdf_out is not None:
+    if verbose:
+      print("--> found cached data...")
+    return gdf_out
 
   gdf: gpd.GeoDataFrame
 
@@ -1400,6 +1433,8 @@ def _enrich_df_geometry(df_in: pd.DataFrame, s_enrich_this: dict, dataframes: di
   # spatially infer missing
   gdf_merged = perform_spatial_inference(gdf_merged, s_infer, "key", verbose=verbose)
 
+  write_cached_df(df_in, gdf_merged, "geom/enrich", "key", s_enrich_this)
+
   return gdf_merged
 
 
@@ -1453,7 +1488,7 @@ def _basic_geo_enrichment(gdf_in: gpd.GeoDataFrame, settings: dict, verbose: boo
   gdf_out = get_cached_df(gdf_in, "geom/basic", "key")
   if gdf_out is not None:
     if verbose:
-      print("-->found cached data...")
+      print("--> found cached data...")
     return gdf_out
 
   gdf = gdf_in.copy()
@@ -1479,12 +1514,6 @@ def _basic_geo_enrichment(gdf_in: gpd.GeoDataFrame, settings: dict, verbose: boo
   if verbose:
     _t = t.get("area")
     print(f"--> calculated GIS area of each parcel...({_t:.2f}s)")
-  t.start("vertices")
-  gdf["geom_vertices"] = gdf.geometry.apply(get_exterior_coords)
-  t.stop("vertices")
-  if verbose:
-    _t = t.get("vertices")
-    print(f"--> counted vertices per parcel...({_t:.2f}s)")
   gdf = _calc_geom_stuff(gdf, verbose)
   t.start("polar")
   gdf = _enrich_polar_coordinates(gdf, settings, verbose)

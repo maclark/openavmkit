@@ -71,10 +71,10 @@ class OpenStreetMapService:
             return gpd.GeoDataFrame()
 
         # check if we have already cached this data, AND the settings are the same
-        if use_cache and check_cache("osm/water_bodies", signature=settings, filetype="gdf"):
+        if use_cache and check_cache("osm/water_bodies", signature=settings, filetype="df"):
             print("----> using cached water bodies")
             # if so return the cached version
-            return read_cache("osm/water_bodies", "gdf")
+            return read_cache("osm/water_bodies", "df")
         
         min_area = settings.get('min_area', 10000)
         top_n = settings.get('top_n', 5)
@@ -125,7 +125,7 @@ class OpenStreetMapService:
             self.features['water_bodies_top'] = water_bodies_top
 
             # write to cache so we can skip on next run
-            write_cache("osm/water_bodies", water_bodies_filtered, settings,"gdf")
+            write_cache("osm/water_bodies", water_bodies_filtered, settings,"df")
 
             return water_bodies_filtered
             
@@ -152,10 +152,10 @@ class OpenStreetMapService:
             return gpd.GeoDataFrame()
 
         # check if we have already cached this data, AND the settings are the same
-        if use_cache and check_cache("osm/transportation", signature=settings, filetype="gdf"):
+        if use_cache and check_cache("osm/transportation", signature=settings, filetype="df"):
             print("----> using cached transportation")
             # if so return the cached version
-            return read_cache("osm/transportation", "gdf")
+            return read_cache("osm/transportation", "df")
             
         min_length = settings.get('min_length', 1000)
         top_n = settings.get('top_n', 5)
@@ -207,7 +207,7 @@ class OpenStreetMapService:
         self.features['transportation_top'] = transportation_top
 
         # write to cache so we can skip on next run
-        write_cache("osm/transportation", transportation_filtered, settings,"gdf")
+        write_cache("osm/transportation", transportation_filtered, settings,"df")
 
         return transportation_filtered
 
@@ -257,10 +257,10 @@ class OpenStreetMapService:
             return gpd.GeoDataFrame()
 
         # check if we have already cached this data, AND the settings are the same
-        if use_cache and check_cache("osm/educational_institutions", signature=settings, filetype="gdf"):
+        if use_cache and check_cache("osm/educational_institutions", signature=settings, filetype="df"):
             print("----> using cached educational institutions")
             # if so return the cached version
-            return read_cache("osm/educational_institutions", "gdf")
+            return read_cache("osm/educational_institutions", "df")
             
         min_area = settings.get('min_area', 1000)
         top_n = settings.get('top_n', 5)
@@ -324,7 +324,7 @@ class OpenStreetMapService:
             self.features['educational_top'] = institutions_top
 
             # write to cache so we can skip on next run
-            write_cache("osm/educational_institutions", institutions_filtered, settings,"gdf")
+            write_cache("osm/educational_institutions", institutions_filtered, settings,"df")
 
             return institutions_filtered
             
@@ -353,10 +353,10 @@ class OpenStreetMapService:
             return gpd.GeoDataFrame()
 
         # check if we have already cached this data, AND the settings are the same
-        if use_cache and check_cache("osm/parks", signature=settings, filetype="gdf"):
+        if use_cache and check_cache("osm/parks", signature=settings, filetype="df"):
             print("----> using cached parks")
             # if so return the cached version
-            return read_cache("osm/parks", "gdf")
+            return read_cache("osm/parks", "df")
             
         min_area = settings.get('min_area', 1000)
         top_n = settings.get('top_n', 5)
@@ -406,7 +406,7 @@ class OpenStreetMapService:
         self.features['parks_top'] = parks_top
 
         # write to cache so we can skip on next run
-        write_cache("osm/parks", parks_filtered, settings,"gdf")
+        write_cache("osm/parks", parks_filtered, settings,"df")
 
         return parks_filtered
 
@@ -427,10 +427,10 @@ class OpenStreetMapService:
             return gpd.GeoDataFrame()
 
         # check if we have already cached this data, AND the settings are the same
-        if use_cache and check_cache("osm/golf_courses", signature=settings, filetype="gdf"):
+        if use_cache and check_cache("osm/golf_courses", signature=settings, filetype="df"):
             print("----> using cached golf courses")
             # if so return the cached version
-            return read_cache("osm/golf_courses", "gdf")
+            return read_cache("osm/golf_courses", "df")
             
         min_area = settings.get('min_area', 10000)
         top_n = settings.get('top_n', 3)
@@ -479,7 +479,7 @@ class OpenStreetMapService:
         self.features['golf_courses_top'] = golf_courses_top
 
         # write to cache so we can skip on next run
-        write_cache("osm/golf_courses", golf_courses_filtered, settings,"gdf")
+        write_cache("osm/golf_courses", golf_courses_filtered, settings,"df")
 
         return golf_courses_filtered
     
