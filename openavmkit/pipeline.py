@@ -16,6 +16,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 
 import openavmkit
 import openavmkit.data
@@ -722,13 +723,19 @@ def write_notebook_output_sup(sup: SalesUniversePair, prefix="1-assemble"):
    df_universe.to_parquet(f"out/look/{prefix}-universe.parquet")
 
    # Prepare and write sales DataFrame
+
    df_sales = prepare_df_for_parquet(sup["sales"])
    df_sales.to_parquet(f"out/look/{prefix}-sales.parquet")
+
+   df_hydrated = get_hydrated_sales_from_sup(sup)
+   df_hydrated = prepare_df_for_parquet(df_hydrated)
+   df_hydrated.to_parquet(f"out/look/{prefix}-sales-hydrated.parquet")
 
    print("Results written to:")
    print(f"...out/{prefix}-sup.pickle")
    print(f"...out/look/{prefix}-universe.parquet")
    print(f"...out/look/{prefix}-sales.parquet")
+   print(f"...out/look/{prefix}-sales-hydrated.parquet")
 
 
 def cloud_sync(locality: str, verbose: bool = False, env_path: str = "", settings: dict = None, dry_run: bool = False, ignore_paths: list = None):
