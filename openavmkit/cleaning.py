@@ -265,8 +265,18 @@ def _fill_with(df: pd.DataFrame, field: str, value):
 	df.loc[df[field].isna(), field] = value
 	return df
 
+def _fill_custom(df: pd.DataFrame, entry: dict):
+	field = entry.get("field")
+	value = entry.get("value")
+	return _fill_with(df, field, value)
 
-def _fill_thing(df: pd.DataFrame, field: str, fill_method: str):
+
+def _fill_thing(df: pd.DataFrame, field: str | dict, fill_method: str):
+	if fill_method == "custom":
+		if isinstance(field, dict):
+			df = _fill_custom(df, field)
+		else:
+			raise ValueError("Entry must be a dictionary when fill_method is 'custom'")
 	if fill_method == "zero":
 		df = _fill_with(df, field, 0)
 	elif fill_method == "unknown":

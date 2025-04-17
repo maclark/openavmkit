@@ -2772,6 +2772,10 @@ def _tag_model_groups_sup(sup: SalesUniversePair, settings: dict, verbose: bool 
 
   os.makedirs("out/look", exist_ok=True)
   df_univ.to_parquet("out/look/tag-univ-0.parquet")
+
+  if not isinstance(df_univ, gpd.GeoDataFrame):
+    df_univ = gpd.GeoDataFrame(df_univ, geometry="geometry")
+  df_univ.to_parquet("out/look/tag-univ-0.parquet", engine="pyarrow")
   old_model_group = df_univ[["key", "model_group"]]
 
   for mg_id in mg:
@@ -2788,7 +2792,7 @@ def _tag_model_groups_sup(sup: SalesUniversePair, settings: dict, verbose: bool 
     print(f"common area filters = {common_area_filters}")
     df_univ = _assign_modal_model_group_to_common_area(df_univ, mg_id, common_area_filters)
 
-  df_univ.to_parquet("out/look/tag-univ-1.parquet")
+  df_univ.to_parquet("out/look/tag-univ-1.parquet", engine="pyarrow")
   index_changed = ~old_model_group["model_group"].eq(df_univ["model_group"])
   rows_changed = df_univ[index_changed]
   print(f" --> {len(rows_changed)} parcels had their model group changed.")
@@ -2840,7 +2844,7 @@ def _assign_modal_model_group_to_common_area(df_univ_in: gpd.GeoDataFrame, model
   df = identify_parcels_with_holes(df_univ)
 
   print(f" {len(df)} parcels with holes found.")
-  df.to_parquet("out/look/common_area-0-holes.parquet")
+  df.to_parquet("out/look/common_area-0-holes.parquet", engine="pyarrow")
   df["has_holes"] = True
 
   if common_area_filters is not None:
@@ -2852,7 +2856,7 @@ def _assign_modal_model_group_to_common_area(df_univ_in: gpd.GeoDataFrame, model
     df = df.drop_duplicates(subset="key")
 
   print(f" {len(df)} potential COMMON AREA parcels found.")
-  df.to_parquet("out/look/common_area-1-common_area.parquet")
+  df.to_parquet("out/look/common_area-1-common_area.parquet", engine="pyarrow")
 
   print(f"Assigning modal model_group to {len(df)}/{len(df_univ_in)} potential parcels...")
 
@@ -2921,9 +2925,9 @@ def _assign_modal_model_group_to_common_area(df_univ_in: gpd.GeoDataFrame, model
     else:
       print(f" {idx} --> XXX modal model group is {modal_model_group} for {len(inside_parcels)} inside parcels")
 
-  df.to_parquet("out/look/common_area-2-tagged.parquet")
+  df.to_parquet("out/look/common_area-2-tagged.parquet", engine="pyarrow")
   df_return = df_univ_in.copy()
   # Update and return df_univ
   df_return = combine_dfs(df_return, df[["key", "model_group"]], df2_stomps=True, index="key")
-  df_return.to_parquet("out/look/common_area-3-return.parquet")
+  df_return.to_parquet("out/look/common_area-3-return.parquet", engine="pyarrow")
   return df_return

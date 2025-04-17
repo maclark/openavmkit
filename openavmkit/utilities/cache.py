@@ -24,7 +24,10 @@ def write_cache(
       file.write(payload)
     elif filetype == "df":
       if isinstance(payload, pd.DataFrame):
-        payload.to_parquet(path)
+        if isinstance(payload, gpd.GeoDataFrame):
+          payload.to_parquet(path, engine="pyarrow")
+        else:
+          payload.to_parquet(path)
       else:
         raise TypeError("Payload must be a DataFrame for df type.")
 

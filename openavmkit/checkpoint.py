@@ -61,9 +61,9 @@ def read_checkpoint(path: str) -> Any:
 def write_checkpoint(data: Any, path: str):
   os.makedirs("out/checkpoints", exist_ok=True)
   if isinstance(data, gpd.GeoDataFrame):
-    data.to_parquet(f"out/checkpoints/{path}.parquet", index=False, engine="pyarrow")
+    data.to_parquet(f"out/checkpoints/{path}.parquet", engine="pyarrow")
   elif isinstance(data, pd.DataFrame):
-    data.to_parquet(f"out/checkpoints/{path}.parquet", index=False)
+    data.to_parquet(f"out/checkpoints/{path}.parquet")
   else:
     with open(f"out/checkpoints/{path}.pickle", "wb") as file:
       pickle.dump(data, file)

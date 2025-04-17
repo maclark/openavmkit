@@ -615,7 +615,7 @@ def write_out_all_results(sup:SalesUniversePair, all_results:dict):
 		df_univ.to_csv(f"{outpath}/universe.csv", index=False)
 		t.stop("csv")
 		t.start("parquet")
-		df_univ.to_parquet(f"{outpath}/universe.parquet", index=False)
+		df_univ.to_parquet(f"{outpath}/universe.parquet", engine="pyarrow")
 		t.stop("parquet")
 
 	print("")

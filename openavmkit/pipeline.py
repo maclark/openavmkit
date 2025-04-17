@@ -720,7 +720,7 @@ def write_notebook_output_sup(sup: SalesUniversePair, prefix="1-assemble"):
 
    # Prepare and write universe DataFrame
    df_universe = prepare_df_for_parquet(sup["universe"])
-   df_universe.to_parquet(f"out/look/{prefix}-universe.parquet")
+   df_universe.to_parquet(f"out/look/{prefix}-universe.parquet", engine="pyarrow")
 
    # Prepare and write sales DataFrame
 
@@ -729,7 +729,7 @@ def write_notebook_output_sup(sup: SalesUniversePair, prefix="1-assemble"):
 
    df_hydrated = get_hydrated_sales_from_sup(sup)
    df_hydrated = prepare_df_for_parquet(df_hydrated)
-   df_hydrated.to_parquet(f"out/look/{prefix}-sales-hydrated.parquet")
+   df_hydrated.to_parquet(f"out/look/{prefix}-sales-hydrated.parquet", engine="pyarrow")
 
    print("Results written to:")
    print(f"...out/{prefix}-sup.pickle")
