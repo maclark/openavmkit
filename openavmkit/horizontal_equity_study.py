@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import openavmkit.utilities.stats as stats
 from openavmkit.data import SalesUniversePair
+from openavmkit.utilities.assertions import dfs_are_equal
+from openavmkit.utilities.cache import get_cached_df, write_cached_df
 from openavmkit.utilities.clustering import make_clusters
 from openavmkit.utilities.data import do_per_model_group
 
@@ -231,9 +233,20 @@ def mark_horizontal_equity_clusters_per_model_group(df_in: pd.DataFrame, setting
   :returns: DataFrame with horizontal equity cluster IDs marked.
   :rtype: pandas.DataFrame
   """
-	return do_per_model_group(df_in, settings, _mark_he_ids, params={
+
+	he = settings.get("analysis", {}).get(settings_object, {})
+	df_out = get_cached_df(df_in, id_name, "key", he)
+	if df_out is not None:
+		return df_out
+
+	df_out = do_per_model_group(df_in, settings, _mark_he_ids, params={
 		"settings": settings, "verbose": verbose, "settings_object": settings_object, "id_name": id_name, "output_folder": output_folder
 	}, key="key", verbose=verbose)
+
+	df_result = write_cached_df(df_in, df_out, id_name, "key", he)
+
+	assert dfs_are_equal(df_out, df_result)
+	return df_out
 
 
 def mark_horizontal_equity_clusters(df: pd.DataFrame, settings: dict, verbose: bool = False, settings_object="horizontal_equity", id_name: str = "he_id", output_folder: str = ""):
