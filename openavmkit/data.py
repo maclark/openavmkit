@@ -542,7 +542,11 @@ def process_data(dataframes: dict[str, pd.DataFrame], settings: dict, verbose: b
     raise ValueError("The 'valid_sale' column is required in the sales data.")
   if "vacant_sale" not in df_sales:
     raise ValueError("The 'vacant_sale' column is required in the sales data.")
-
+  # Print number and percentage of valid sales
+  valid_count = df_sales["valid_sale"].sum()
+  total_count = len(df_sales)
+  valid_percent = (valid_count / total_count * 100) if total_count > 0 else 0
+  print(f"Valid sales: {valid_count} ({valid_percent:.1f}% of {total_count} total)")
   df_sales = df_sales[df_sales["valid_sale"].eq(True)].copy().reset_index(drop=True)
 
   sup: SalesUniversePair = SalesUniversePair(universe=df_univ, sales=df_sales)
@@ -2185,7 +2189,13 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
   column_names = _snoop_column_names(filename)
 
   e_load = entry.get("load", {})
-  e_calc = entry.get("calc", {})
+
+  # Get all calc and tweak operations in order they appear
+  operation_order = []
+  for key in entry:
+    if "calc" in key or "tweak" in key:  # Match any key containing calc or tweak
+      op_type = "calc" if "calc" in key else "tweak"
+      operation_order.append({"type": op_type, "operations": entry[key]})
 
   if verbose:
     print(f"Loading \"{filename}\"...")
@@ -2213,7 +2223,12 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
       cols_to_load += [original]
       rename_map[original] = rename_key
 
-  fields_in_calc = _crawl_calc_dict_for_fields(entry.get("calc", {}))
+  # Only include fields from calcs that exist in the source data
+  fields_in_calc = []
+  for operation in operation_order:
+    if operation["type"] == "calc":
+      fields_in_calc.extend(_crawl_calc_dict_for_fields(operation["operations"]))
+  fields_in_calc = [f for f in fields_in_calc if f in column_names]
   cols_to_load += fields_in_calc
   cols_to_load = list(set(cols_to_load))
 
@@ -2238,8 +2253,16 @@ def _load_dataframe(entry: dict, settings: dict, verbose: bool = False, fields_c
   else:
     raise ValueError(f"Unsupported file extension: {ext}")
 
-  df = perform_calculations(df, e_calc)
+  # Rename columns
   df = df.rename(columns=rename_map)
+
+  # Perform operations in order they appear in settings
+  for operation in operation_order:
+    op_type = operation["type"]
+    if op_type == "calc":
+      df = perform_calculations(df, operation["operations"], rename_map)
+    elif op_type == "tweak":
+      df = perform_tweaks(df, operation["operations"], rename_map)
 
   if fields_cat is None:
     fields_cat = get_fields_categorical(settings, include_boolean=False)

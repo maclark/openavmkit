@@ -82,7 +82,8 @@ def resolve_bool_filter(df: pd.DataFrame, f: list) -> pd.Series:
   return final_index
 
 
-def resolve_filter(df: pd.DataFrame, f: list) -> pd.Series:
+
+def resolve_filter(df: pd.DataFrame, f: list, rename_map: dict = None) -> pd.Series:
   """
   Resolve a filter list into a boolean Series for the DataFrame (which can be used for selection).
 
@@ -93,6 +94,8 @@ def resolve_filter(df: pd.DataFrame, f: list) -> pd.Series:
   :type df: pandas.DataFrame
   :param f: Filter list.
   :type f: list
+  :param rename_map: Optional mapping of original to renamed columns.
+  :type rename_map: dict, optional
   :returns: Boolean Series corresponding to the filter.
   :rtype: pandas.Series
   :raises ValueError: If the operator is unknown.
@@ -110,6 +113,15 @@ def resolve_filter(df: pd.DataFrame, f: list) -> pd.Series:
     return resolve_bool_filter(df, f)
   else:
     field = f[1]
+    # Handle field name resolution with rename_map
+    if rename_map:
+      # Create reverse map for looking up original names
+      reverse_map = {v: k for k, v in rename_map.items()}
+      if field in reverse_map and reverse_map[field] in df:
+        field = reverse_map[field]
+      elif field in rename_map and rename_map[field] in df:
+        field = rename_map[field]
+
     if len(f) == 3:
       value = f[2]
     else:
@@ -139,8 +151,44 @@ def resolve_filter(df: pd.DataFrame, f: list) -> pd.Series:
       else:
         raise ValueError(f"Value must be a string or list for operator {operator}, found: {type(value)}")
       return selection
+    if operator == "contains_case_insensitive":
+      if isinstance(value, str):
+        selection = df[field].str.contains(value, case=False)
+      elif isinstance(value, list):
+        selection = df[field].str.contains(value[0], case=False)
+        for v in value[1:]: selection |= df[field].str.contains(v, case=False)
+      else:
+        raise ValueError(f"Value must be a string or list for operator {operator}, found: {type(value)}")
+      return selection
 
   raise ValueError(f"Unknown operator {operator}")
+
+
+
+def _resolve_field_name(df: pd.DataFrame, field: str, rename_map: dict = None) -> str | None:
+  """
+  Helper function to resolve a field name using the rename map.
+  Returns the resolved field name if found, None otherwise.
+
+  :param df: DataFrame containing fields.
+  :type df: pandas.DataFrame
+  :param field: Field name to resolve.
+  :type field: str
+  :param rename_map: Optional mapping of original to renamed columns.
+  :type rename_map: dict, optional
+  :returns: Resolved field name or None if not found.
+  :rtype: str | None
+  """
+  if field in df:
+    return field
+  if rename_map:
+    # Create reverse map for looking up original names
+    reverse_map = {v: k for k, v in rename_map.items()}
+    if field in reverse_map and reverse_map[field] in df:
+      return reverse_map[field]
+    elif field in rename_map and rename_map[field] in df:
+      return rename_map[field]
+  return None
 
 
 def validate_filter_list(filters: list[list]):
