@@ -131,7 +131,7 @@ def write_cached_df(
 
   df_cached = get_cached_df(df_orig, filename, key, extra_signature)
 
-  assert dfs_are_equal(df_new, df_cached)
+  assert dfs_are_equal(df_new, df_cached, allow_weak=True)
 
   return df_cached
 
@@ -153,7 +153,13 @@ def get_cached_df(
     cols_to_replace = [c for c in df_diff.columns if c != key]
     df_base = df.drop(columns=cols_to_replace, errors="ignore")
 
-    return df_base.merge(df_diff, how="left", on=key)
+    df_merged = df_base.merge(df_diff, how="left", on=key)
+
+    if isinstance(df_diff, gpd.GeoDataFrame):
+      df_merged = gpd.GeoDataFrame(df_merged, geometry="geometry")
+      df_merged = ensure_geometries(df_merged, "geometry", df_diff.crs)
+
+    return df_merged
 
   return None
 

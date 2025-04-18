@@ -2771,6 +2771,9 @@ def _tag_model_groups_sup(sup: SalesUniversePair, settings: dict, verbose: bool 
     df_sales_hydrated.loc[idx_no_model_group & sales_index, "model_group"] = mg_id
 
   os.makedirs("out/look", exist_ok=True)
+
+  if not isinstance(df_univ, gpd.GeoDataFrame):
+    df_univ = gpd.GeoDataFrame(df_univ, geometry="geometry")
   df_univ.to_parquet("out/look/tag-univ-0.parquet")
 
   if not isinstance(df_univ, gpd.GeoDataFrame):

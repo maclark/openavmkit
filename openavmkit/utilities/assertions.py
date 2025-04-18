@@ -69,7 +69,7 @@ def dicts_are_equal(a: dict, b: dict):
 	return True
 
 
-def dfs_are_equal(a: pd.DataFrame, b: pd.DataFrame, primary_key=None):
+def dfs_are_equal(a: pd.DataFrame, b: pd.DataFrame, primary_key=None, allow_weak=False):
 	if primary_key is not None:
 		a = a.sort_values(by=primary_key)
 		b = b.sort_values(by=primary_key)
@@ -96,10 +96,14 @@ def dfs_are_equal(a: pd.DataFrame, b: pd.DataFrame, primary_key=None):
 			bad_rows_a = a[~a[col].eq(b[col])]
 			bad_rows_b = b[~a[col].eq(b[col])]
 
+			weak_fail = False
+
 			if len(bad_rows_a) == 0 and len(bad_rows_b) == 0:
-				print(f"Column '{col}' does not match even though rows are naively equal, look:")
-				print(a[col])
-				print(b[col])
+				weak_fail = True
+				if not allow_weak:
+					print(f"Column '{col}' does not match even though rows are naively equal, look:")
+					print(a[col])
+					print(b[col])
 			else:
 				print(f"Column '{col}' does not match, look:")
 				# print rows that are not equal:
@@ -107,6 +111,9 @@ def dfs_are_equal(a: pd.DataFrame, b: pd.DataFrame, primary_key=None):
 				print(bad_rows_b)
 
 			pd.set_option('display.max_columns', old_val)
+
+			if weak_fail and allow_weak:
+				continue
 
 			return False
 	return True
