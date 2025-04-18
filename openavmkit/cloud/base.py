@@ -1,6 +1,8 @@
 # This file lets us abstract remote storage services (Azure, AWS, etc.) into a common interface
+import fnmatch
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Literal
 
 CloudType = Literal[
@@ -82,14 +84,7 @@ class CloudService:
         local_file_path = _fix_path_slashes(local_file_path)
         
         # Check if this file should be ignored
-        should_ignore = False
-        if ignore_paths:
-          for ignore_path in ignore_paths:
-            if ignore_path in rel_path or ignore_path in remote_file_path:
-              if verbose:
-                print(f"Ignoring file '{rel_path}' because it matches ignore pattern '{ignore_path}'")
-              should_ignore = True
-              break
+        should_ignore = _should_ignore(rel_path, remote_file_path, ignore_paths, verbose=verbose)
         
         if should_ignore:
           continue
@@ -204,18 +199,18 @@ class CloudService:
         size_delta = abs(local_size - remote_size)
         time_delta = abs(remote_mod_time_utc - local_mod_time_utc)
 
+        # If both the size and modification time are nearly identical, assume they are in sync.
+        if (size_delta == 0 and time_delta <= TIME_TOLERANCE):
+          if verbose:
+            print(f"{rel_path}: Files are in sync. No action needed.")
+          continue
+
         if verbose:
           print(f"\nConflict for '{rel_path}':")
           print(f"-->Local  - size: {local_size:10,.0f} bytes, modified: {local_mod_time_utc}")
           print(f"-->Remote - size: {remote_size:10,.0f} bytes, modified: {remote_mod_time_utc}")
           print(f"-->Size delta: {size_delta:10,.0f} bytes")
           print(f"-->Time delta: {time_delta}")
-
-        # If both the size and modification time are nearly identical, assume they are in sync.
-        if (size_delta == 0 and time_delta <= TIME_TOLERANCE):
-          if verbose:
-            print("  Files are in sync. No action needed.")
-          continue
 
         # Decide which version is more current.
         if remote_mod_time_utc > local_mod_time_utc:
@@ -245,6 +240,28 @@ class CloudService:
         _print_upload(remote_path, local_file_path)
         if not dry_run:
           self.upload_file(remote_path, local_file_path)
+
+
+def _should_ignore(rel_path: str, remote_path: str, ignore_paths, *, verbose=False):
+  rel  = Path(rel_path).resolve()       # normalise once
+  rem  = Path(remote_path).resolve()
+
+  for raw_pat in ignore_paths:
+    pat = raw_pat.strip()             # allow trailing spaces / new‑lines
+
+    # Treat it as a glob pattern first
+    if fnmatch.fnmatch(rel.as_posix(),  pat) or fnmatch.fnmatch(rem.as_posix(),  pat):
+      if verbose:
+        print(f"Ignoring '{rel_path}' (matched glob '{pat}')")
+      return True
+
+    # Then treat it as a literal path / prefix
+    if rel.is_relative_to(pat) or rem.is_relative_to(pat):
+      if verbose:
+        print(f"Ignoring '{rel_path}' (under '{pat}')")
+      return True
+
+  return False
 
 
 def _print_download(remote_file: str, local_file: str):
