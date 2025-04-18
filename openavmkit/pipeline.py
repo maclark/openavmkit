@@ -759,6 +759,13 @@ def cloud_sync(locality: str, verbose: bool = False, env_path: str = "", setting
       print("Cloud service not initialized, skipping...")
       return
 
+   if ignore_paths is None:
+      ignore_paths = []
+   extra_ignore = settings.get("cloud",{}).get("ignore_paths", [])
+   ignore_paths = ignore_paths + extra_ignore
+
+   print(f"ignore_paths = {ignore_paths}")
+
    remote_path = locality.replace("-", "/") + "/"
    cloud_service.sync_files(locality, "in", remote_path, dry_run=dry_run, verbose=verbose, ignore_paths=ignore_paths)
 
