@@ -1,8 +1,11 @@
 import pandas as pd
+import numpy as np
+import lightgbm as lgb
 
 from openavmkit.data import SalesUniversePair, get_field_classifications, is_series_all_bools
 from openavmkit.utilities.settings import get_valuation_date, get_fields_categorical, get_fields_boolean, \
 	get_grouped_fields_from_data_dictionary, get_data_dictionary, get_model_group_ids
+from openavmkit.utilities.cache import write_cache, read_cache, check_cache
 
 
 
@@ -399,3 +402,174 @@ def _fill_unknown_values(df, settings: dict):
 				df[field] = df[field].fillna(False).astype(bool)
 
 	return df
+
+
+def validate_arms_length_sales(sup: SalesUniversePair, settings: dict, verbose: bool = False) -> SalesUniversePair:
+	"""
+	Validate arms-length sales by identifying suspiciously low sale prices using LightGBM.
+	Only marks sales as invalid if they are both:
+	1. Significantly below their predicted value (ratio < min_ratio_threshold)
+	2. Below the max_threshold price (default 10000)
+
+	:param sup: Sales and universe data
+	:type sup: SalesUniversePair
+	:param settings: Settings dictionary
+	:type settings: dict
+	:param verbose: Whether to print verbose output
+	:type verbose: bool, optional
+	:returns: Updated SalesUniversePair with suspicious sales marked as invalid
+	:rtype: SalesUniversePair
+	"""
+	s_data = settings.get("data", {})
+	s_process = s_data.get("process", {})
+	s_validation = s_process.get("arms_length_validation", {})
+	
+	if not s_validation.get("enabled", False):
+		if verbose:
+			print("Arms length validation disabled, skipping...")
+		return sup
+
+	min_sales = s_validation.get("min_sales_per_group", 30)
+	min_ratio_threshold = s_validation.get("min_ratio_threshold", 0.5)  # Default: flag sales below 50% of predicted value
+	max_threshold = s_validation.get("max_threshold", 10000)  # Default: only consider sales below $10k
+
+	# Get experiment variables from settings
+	variables = settings.get("modeling", {}).get("experiment", {}).get("variables", [])
+	if not variables:
+		raise ValueError("No variables defined for outlier detection. Please check settings `modeling.experiment.variables`")
+
+	# Get sales and ensure model_group is present
+	df_sales = sup["sales"].copy()
+	df_univ = sup["universe"].copy()
+
+	# Get model groups and variables from universe and merge to sales
+	merge_cols = ["key", "model_group"] + variables
+	df_sales = df_sales.merge(
+		df_univ[merge_cols],
+		on="key",
+		how="left"
+	)
+
+	model_groups = df_sales["model_group"].unique()
+
+	excluded_sales = []
+	total_excluded = 0
+	total_sales = len(df_sales)
+
+	if verbose:
+		print("\nValidating arms-length sales...")
+		print(f"Using {len(variables)} variables for value prediction")
+		print(f"Minimum sales per group: {min_sales}")
+		print(f"Maximum price threshold: ${max_threshold:,}")
+		print(f"Minimum ratio threshold: {min_ratio_threshold}")
+		print(f"\nFound {len(model_groups)} model groups")
+		print("\nProcessing by model group:")
+
+	for group in model_groups:
+		if pd.isna(group):
+			if verbose:
+				print("\nSkipping sales with no model group")
+			continue
+
+		df_group = df_sales[df_sales["model_group"].eq(group)].copy()
+		n_sales = len(df_group)
+		
+		if n_sales < min_sales:
+			if verbose:
+				print(f"\n{group}: Skipping - insufficient sales ({n_sales} < {min_sales})")
+			continue
+
+		if verbose:
+			print(f"\n{group}: Processing {n_sales} sales...")
+
+		# Prepare features for prediction
+		features = df_group[variables].copy()
+		
+		# Handle missing values - using recommended approach to avoid FutureWarning
+		features = features.fillna(features.mean())
+		features = features.infer_objects(copy=False)
+
+		# Split into training and prediction sets
+		# Use only valid sales for training
+		valid_mask = df_group["valid_sale"].eq(True)
+		X_train = features[valid_mask]
+		y_train = df_group[valid_mask]["sale_price"]
+		X_pred = features
+
+		# Create LightGBM datasets
+		train_data = lgb.Dataset(X_train, label=y_train)
+		
+		# Set LightGBM parameters
+		params = {
+			'objective': 'regression',
+			'metric': 'rmse',
+			'num_leaves': 31,
+			'learning_rate': 0.1,
+			'feature_fraction': 0.8,
+			'bagging_fraction': 0.8,
+			'bagging_freq': 5,
+			'verbose': -1
+		}
+		
+		# Train LightGBM model
+		model = lgb.train(
+			params,
+			train_data,
+			num_boost_round=100
+		)
+		
+		# Get predicted values
+		predicted_values = model.predict(X_pred)
+		
+		# Calculate ratio of actual to predicted value
+		ratios = df_group["sale_price"] / predicted_values
+		
+		# Identify suspicious sales - those that are:
+		# 1. Below the max_threshold price AND
+		# 2. Have a ratio significantly below predicted value
+		suspicious_mask = (
+			(df_group["sale_price"] <= max_threshold) & 
+			(ratios < min_ratio_threshold)
+		)
+		
+		# Get suspicious sale keys
+		suspicious_keys = df_group[suspicious_mask]["key_sale"].tolist()
+		
+		if suspicious_keys:
+			excluded_info = {
+				"model_group": group,
+				"key_sales": suspicious_keys,
+				"total_sales": n_sales,
+				"excluded": len(suspicious_keys),
+				"min_ratio": ratios[suspicious_mask].min(),
+				"max_ratio": ratios[suspicious_mask].max()
+			}
+			excluded_sales.append(excluded_info)
+			total_excluded += len(suspicious_keys)
+			
+			# Mark these sales as invalid
+			df_sales.loc[df_sales["key_sale"].isin(suspicious_keys), "valid_sale"] = False
+			
+			if verbose:
+				print(f"--> Found {len(suspicious_keys)} suspiciously low sales")
+				print(f"--> Ratio range: {ratios[suspicious_mask].min():.2f} to {ratios[suspicious_mask].max():.2f}")
+				print(f"--> All below ${max_threshold:,} and {min_ratio_threshold*100:.0f}% of predicted value")
+
+	if verbose:
+		print(f"\nOverall summary:")
+		print(f"--> Total sales processed: {total_sales}")
+		print(f"--> Total sales excluded: {total_excluded} ({total_excluded/total_sales*100:.1f}%)")
+
+	# Cache the excluded sales info
+	if excluded_sales:
+		cache_data = {
+			"excluded_sales": excluded_sales,
+			"total_sales": total_sales,
+			"total_excluded": total_excluded,
+			"settings": s_validation
+		}
+		write_cache("arms_length_validation", cache_data, cache_data, "dict")
+
+	# Update the SalesUniversePair
+	sup.update_sales(df_sales)
+	return sup

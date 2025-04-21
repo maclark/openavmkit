@@ -266,25 +266,21 @@ class PredictionResults:
     if len(y_clean) > 0:
       self.mse = mean_squared_error(y_clean, y_pred_clean)
       self.rmse = np.sqrt(self.mse)
-      self.r2 = 1 - self.mse / np.var(y_clean)
+      var_y = np.var(y_clean)
+      if var_y == 0:
+        self.r2 = float('nan')  # R² undefined when variance is 0
+      else:
+        self.r2 = 1 - self.mse / var_y
     else:
       self.mse = float('nan')
       self.rmse = float('nan')
       self.r2 = float('nan')
 
-    # Adjusted R2 = 1 – [(1-R2)*(n-1)/(n-k-1)]
-    #
-    # where:
-    #
-    # R2: The R2 of the model
-    # n: The number of observations
-    # k: The number of predictor variables
-
     n = len(y_pred)
     k = len(ind_vars)
     divisor = n - k - 1
-    if divisor == 0:
-      self.adj_r2 = float('inf')
+    if divisor <= 0 or pd.isna(self.r2):
+      self.adj_r2 = float('nan')  # Adjusted R² undefined with insufficient df or undefined R²
     else:
       self.adj_r2 = 1 - ((1 - self.r2) * (n - 1) / divisor)
     self.ratio_study = RatioStudy(y_pred_clean, y_clean)
@@ -1943,6 +1939,12 @@ def run_xgboost(ds: DataSplit, outpath: str, save_params: bool = False, use_save
   xgboost_model.fit(ds.X_train, ds.y_train)
   timing.stop("train")
 
+  # Print timing information for XGBoost model
+  if verbose:
+    print("\n***** XGBoost Model Timing *****")
+    print(timing.print())
+    print("*********************************\n")
+
   return predict_xgboost(ds, xgboost_model, timing, verbose)
 
 
@@ -2043,6 +2045,12 @@ def run_lightgbm(ds: DataSplit, outpath: str, save_params: bool = False, use_sav
   )
   timing.stop("train")
 
+  # Print timing information for LightGBM model
+  if verbose:
+    print("\n***** LightGBM Model Timing *****")
+    print(timing.print())
+    print("*********************************\n")
+  
   return predict_lightgbm(ds, gbm, timing, verbose)
 
 
@@ -2534,8 +2542,8 @@ def predict_local_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Timing
   df_impr = ds.df_universe[["key"] + location_fields].copy()
 
   # start with zero
-  df_land["per_land_sqft"] = 0
-  df_impr["per_impr_sqft"] = 0
+  df_land["per_land_sqft"] = 0.0  # Initialize as float
+  df_impr["per_impr_sqft"] = 0.0  # Initialize as float
 
   # go from most specific to the least specific location (first to last)
   for location_field in location_fields:
@@ -2668,8 +2676,8 @@ def _prepredict_lars_sqft(ds: DataSplit, sqft_model: LocalSqftModel, timing: Tim
   df_impr = ds.df_universe[["key"] + location_fields].copy()
 
   # start with zero
-  df_land["per_land_sqft"] = 0
-  df_impr["per_impr_sqft"] = 0
+  df_land["per_land_sqft"] = 0.0  # Initialize as float
+  df_impr["per_impr_sqft"] = 0.0  # Initialize as float
   df_land["prediction_land"] = 0.0
   df_impr["prediction"] = 0.0
 
