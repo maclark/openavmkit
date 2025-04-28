@@ -1,0 +1,1 @@
+{"num_rows": 10000, "num_columns": 19, "columns": ["bldg_area_finished_sqft", "dist_to_centroid", "geometry", "is_vacant", "key", "land_area_gis_delta_percent", "land_area_gis_delta_sqft", "land_area_gis_sqft", "land_area_given_sqft", "land_area_sqft", "latitude", "latitude_norm", "loc_16", "loc_2", "loc_32", "loc_4", "loc_8", "longitude", "longitude_norm"], "checksum": {}}
