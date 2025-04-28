@@ -1,1 +1,0 @@
-{"num_rows": 10000, "num_columns": 13, "columns": ["bldg_area_finished_sqft", "dist_to_centroid", "geometry", "is_vacant", "key", "land_area_sqft", "latitude", "loc_16", "loc_2", "loc_32", "loc_4", "loc_8", "longitude"], "checksum": {}}
